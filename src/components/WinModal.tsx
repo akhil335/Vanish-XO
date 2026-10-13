@@ -3,25 +3,27 @@
 import React, { useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
-import { Player } from '@/lib/game';
+import { MarkSymbol, SEAT_COLORS } from '@/lib/types';
 import { MarkIcon } from './MarkIcon';
 import { soundManager, triggerHaptic } from '@/lib/audio';
 
 interface WinModalProps {
-  winner: Player | null;
+  winner: MarkSymbol | null;
   onPlayAgain: () => void;
+  isRematchWaiting?: boolean;
 }
 
-export const WinModal: React.FC<WinModalProps> = ({ winner, onPlayAgain }) => {
+export const WinModal: React.FC<WinModalProps> = ({ winner, onPlayAgain, isRematchWaiting = false }) => {
   useEffect(() => {
     if (!winner) return;
 
     soundManager.playWin();
     triggerHaptic('win');
 
-    const colors = winner === 'X' ? ['#00f0ff', '#38bdf8', '#ffffff'] : ['#ff007f', '#f43f5e', '#ffffff'];
+    const config = SEAT_COLORS[winner] || SEAT_COLORS.X;
+    const colors = [config.hex, '#ffffff', '#ffd700'];
 
-    // Burst confetti from sides and center
+    // Burst confetti from sides
     const duration = 2.5 * 1000;
     const animationEnd = Date.now() + duration;
 
@@ -50,6 +52,8 @@ export const WinModal: React.FC<WinModalProps> = ({ winner, onPlayAgain }) => {
 
   if (!winner) return null;
 
+  const config = SEAT_COLORS[winner] || SEAT_COLORS.X;
+
   return (
     <AnimatePresence>
       <motion.div
@@ -62,17 +66,17 @@ export const WinModal: React.FC<WinModalProps> = ({ winner, onPlayAgain }) => {
           initial={{ scale: 0.7, y: 20, opacity: 0 }}
           animate={{ scale: 1, y: 0, opacity: 1 }}
           transition={{ type: 'spring', damping: 20, stiffness: 350 }}
-          className={`relative max-w-xs w-full bg-[#0a0d16] border rounded-3xl p-8 flex flex-col items-center gap-6 shadow-2xl ${
-            winner === 'X'
-              ? 'border-cyan-500/50 shadow-cyan-500/30'
-              : 'border-pink-500/50 shadow-pink-500/30'
-          }`}
+          className="relative max-w-xs w-full bg-[#0a0d16] border rounded-3xl p-8 flex flex-col items-center gap-6 shadow-2xl"
+          style={{
+            borderColor: `${config.hex}88`,
+            boxShadow: `0 0 35px ${config.glow}`,
+          }}
         >
           {/* Ambient Glow Aura */}
           <div
             className="absolute inset-0 rounded-3xl opacity-20 blur-xl pointer-events-none"
             style={{
-              backgroundColor: winner === 'X' ? '#00f0ff' : '#ff007f',
+              backgroundColor: config.hex,
             }}
           />
 
@@ -86,13 +90,14 @@ export const WinModal: React.FC<WinModalProps> = ({ winner, onPlayAgain }) => {
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
             onClick={onPlayAgain}
-            className={`relative z-10 w-full py-4 rounded-2xl font-black text-lg tracking-wider uppercase transition-all duration-200 shadow-lg cursor-pointer ${
-              winner === 'X'
-                ? 'bg-cyan-400 text-black shadow-cyan-400/40 hover:bg-cyan-300'
-                : 'bg-pink-500 text-white shadow-pink-500/40 hover:bg-pink-400'
-            }`}
+            disabled={isRematchWaiting}
+            className="relative z-10 w-full py-4 rounded-2xl font-black text-lg tracking-wider uppercase transition-all duration-200 shadow-lg cursor-pointer text-black"
+            style={{
+              backgroundColor: config.hex,
+              boxShadow: `0 0 20px ${config.glow}`,
+            }}
           >
-            AGAIN
+            {isRematchWaiting ? 'WAITING...' : 'AGAIN'}
           </motion.button>
         </motion.div>
       </motion.div>

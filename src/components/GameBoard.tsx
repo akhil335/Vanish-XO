@@ -2,61 +2,84 @@
 
 import React from 'react';
 import { motion } from 'framer-motion';
-import { GameState, getMarkAgeIndex } from '@/lib/game';
+import { GameState, getMarkAgeIndex, getMarkAgeForSymbol } from '@/lib/game';
+import { MarkSymbol, RoomState, SEAT_COLORS } from '@/lib/types';
 import { MarkIcon } from './MarkIcon';
 import { ParticleDissolve } from './ParticleDissolve';
 
 interface GameBoardProps {
-  state: GameState;
+  state?: GameState;
+  roomState?: RoomState;
   onCellClick: (index: number) => void;
-  isBotThinking?: boolean;
-  vanishedAnim: { cell: number; player: 'X' | 'O'; id: number } | null;
+  disabled?: boolean;
+  vanishedAnim: { cell: number; player: MarkSymbol; id: number } | null;
   onVanishedAnimComplete: () => void;
 }
 
 export const GameBoard: React.FC<GameBoardProps> = ({
   state,
+  roomState,
   onCellClick,
-  isBotThinking = false,
+  disabled = false,
   vanishedAnim,
   onVanishedAnimComplete,
 }) => {
-  const { board, turn, winner, winningLine } = state;
+  const board = state ? state.board : roomState ? roomState.board : Array(9).fill(null);
+  const winner = state ? state.winner : roomState ? roomState.winner : null;
+  const winningLine = state ? state.winningLine : roomState ? roomState.winningLine : null;
+
+  const currentTurnSymbol: MarkSymbol = state
+    ? state.turn
+    : roomState
+    ? roomState.seats[roomState.turnSeatIndex]?.symbol || 'X'
+    : 'X';
+
+  const turnConfig = SEAT_COLORS[currentTurnSymbol] || SEAT_COLORS.X;
+
+  const getAge = (cellIndex: number) => {
+    if (state) {
+      const res = getMarkAgeIndex(state, cellIndex);
+      return res ? { symbol: res.player as MarkSymbol, ageIndex: res.ageIndex, isOldestOfThree: res.isOldestOfThree } : null;
+    }
+    if (roomState) {
+      return getMarkAgeForSymbol(roomState, cellIndex);
+    }
+    return null;
+  };
 
   // Board edge glow based on active turn (No turn text!)
-  const boardTurnGlowClass =
+  const boardBorderColor = winner !== null ? '#ffd700' : turnConfig.hex;
+  const boardShadowGlow =
     winner !== null
-      ? 'border-yellow-500/50 shadow-yellow-500/20'
-      : turn === 'X'
-      ? 'border-cyan-500/70 shadow-[0_0_30px_rgba(0,240,255,0.25)]'
-      : 'border-pink-500/70 shadow-[0_0_30px_rgba(255,0,127,0.25)]';
+      ? '0 0 35px rgba(255, 215, 0, 0.35)'
+      : `0 0 30px ${turnConfig.glow}`;
 
   return (
-    <div className="relative w-full max-w-[360px] aspect-square mx-auto p-2 sm:p-3">
+    <div className="relative w-full max-w-[360px] aspect-square mx-auto p-2 sm:p-3 select-none">
       {/* Dynamic Ambient Edge Glow Aura */}
       <div
-        className={`absolute inset-0 rounded-3xl transition-all duration-500 pointer-events-none blur-xl opacity-30 ${
-          winner !== null
-            ? 'bg-yellow-400'
-            : turn === 'X'
-            ? 'bg-cyan-400'
-            : 'bg-pink-500'
-        }`}
+        className="absolute inset-0 rounded-3xl transition-all duration-500 pointer-events-none blur-xl opacity-35"
+        style={{
+          backgroundColor: winner !== null ? '#ffd700' : turnConfig.hex,
+        }}
       />
 
       {/* Main Grid Frame */}
       <div
-        className={`relative w-full h-full rounded-3xl p-3 bg-[#0a0d17]/90 backdrop-blur-md border-2 transition-all duration-300 grid grid-cols-3 grid-rows-3 gap-2.5 sm:gap-3.5 ${boardTurnGlowClass}`}
+        className="relative w-full h-full rounded-3xl p-3 bg-[#0a0d17]/90 backdrop-blur-md border-2 transition-all duration-300 grid grid-cols-3 grid-rows-3 gap-2.5 sm:gap-3.5"
+        style={{
+          borderColor: boardBorderColor,
+          boxShadow: boardShadowGlow,
+        }}
       >
         {Array.from({ length: 9 }).map((_, index) => {
           const mark = board[index];
           const isWinningCell = winningLine ? winningLine.includes(index) : false;
           const isDimmed = winner !== null && !isWinningCell;
-          const ageInfo = getMarkAgeIndex(state, index);
+          const ageInfo = getAge(index);
           const isVanishingHere = vanishedAnim && vanishedAnim.cell === index;
 
-          const isClickable =
-            !mark && !winner && !isBotThinking;
+          const isClickable = !mark && !winner && !disabled;
 
           return (
             <motion.button
@@ -101,9 +124,11 @@ export const GameBoard: React.FC<GameBoardProps> = ({
               {/* Empty Cell Hover preview hint for current player */}
               {isClickable && (
                 <div
-                  className={`w-2.5 h-2.5 rounded-full opacity-0 hover:opacity-40 transition-opacity duration-200 pointer-events-none ${
-                    turn === 'X' ? 'bg-cyan-400 shadow-cyan-400' : 'bg-pink-500 shadow-pink-500'
-                  }`}
+                  className="w-2.5 h-2.5 rounded-full opacity-0 hover:opacity-40 transition-opacity duration-200 pointer-events-none"
+                  style={{
+                    backgroundColor: turnConfig.hex,
+                    boxShadow: `0 0 8px ${turnConfig.hex}`,
+                  }}
                 />
               )}
             </motion.button>

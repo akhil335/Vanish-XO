@@ -7,15 +7,19 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "party:dev": "partykit dev party/server.ts",
+    "party:deploy": "partykit deploy party/server.ts"
   },
   "dependencies": {
     "canvas-confetti": "^1.9.4",
     "framer-motion": "^14.1.0",
     "lucide-react": "^1.55.0",
     "next": "16.4.0",
+    "partysocket": "^1.3.0",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",
@@ -25,9 +29,14 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.4.0",
+    "partykit": "^0.0.115",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^5.0.4"
   },
+  "onlyBuiltDependencies": [
+    "esbuild",
+    "workerd"
+  ],
   "packageManager": "pnpm@12.5.1"
 }

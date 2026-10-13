@@ -9,6 +9,7 @@ import {
   Player,
 } from '@/lib/game';
 import { soundManager, triggerHaptic } from '@/lib/audio';
+import { useRouter } from 'next/navigation';
 import { GameBoard } from '@/components/GameBoard';
 import { TopControls } from '@/components/TopControls';
 import { WinModal } from '@/components/WinModal';
@@ -16,6 +17,8 @@ import { FirstTimeHint } from '@/components/FirstTimeHint';
 import { SeoSection } from '@/components/SeoSection';
 
 export default function Home() {
+  const router = useRouter();
+  const [joinInput, setJoinInput] = useState('');
   const [gameState, setGameState] = useState<GameState>(() => createInitialState('X'));
   const [mode, setMode] = useState<'bot' | 'pvp'>('bot');
   const [botDifficulty, setBotDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
@@ -200,10 +203,40 @@ export default function Home() {
         <GameBoard
           state={gameState}
           onCellClick={handleCellClick}
-          isBotThinking={isBotThinking}
+          disabled={isBotThinking}
           vanishedAnim={vanishedAnim}
           onVanishedAnimComplete={() => setVanishedAnim(null)}
         />
+
+        {/* Quick Room Code Join */}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            const code = joinInput.trim().toUpperCase();
+            if (code.length === 4) {
+              router.push(`/room/${code}`);
+            }
+          }}
+          className="w-full max-w-[360px] flex items-center gap-2 px-1"
+        >
+          <input
+            type="text"
+            id="join-room-input"
+            maxLength={4}
+            placeholder="ROOM CODE"
+            value={joinInput}
+            onChange={(e) => setJoinInput(e.target.value.toUpperCase())}
+            className="flex-1 bg-slate-900/60 border border-white/10 focus:border-cyan-400 rounded-xl px-3 py-2 text-center font-mono text-xs tracking-widest text-cyan-300 placeholder:text-slate-600 focus:outline-none uppercase transition-colors"
+          />
+          <button
+            type="submit"
+            id="join-room-btn"
+            disabled={joinInput.trim().length !== 4}
+            className="px-4 py-2 bg-cyan-400 text-black font-black text-xs rounded-xl uppercase tracking-wider disabled:opacity-25 disabled:cursor-not-allowed hover:bg-cyan-300 transition-all cursor-pointer shadow-md"
+          >
+            JOIN
+          </button>
+        </form>
       </div>
 
       {/* Win Modal with Confetti and 'Again' button */}

@@ -5,6 +5,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Bot, Users, Volume2, VolumeX, RotateCcw, Share2, Check } from 'lucide-react';
 import { GameState } from '@/lib/game';
 
+import { useRouter } from 'next/navigation';
+import { generateRoomCode } from '@/lib/types';
+
 interface TopControlsProps {
   mode: 'bot' | 'pvp';
   onModeChange: (mode: 'bot' | 'pvp') => void;
@@ -31,16 +34,35 @@ export const TopControls: React.FC<TopControlsProps> = ({
   streak,
 }) => {
   const [copied, setCopied] = useState(false);
+  const router = useRouter();
 
-  const handleShare = () => {
-    if (typeof window !== 'undefined') {
-      const url = window.location.href;
-      if (navigator.clipboard) {
-        navigator.clipboard.writeText(url).catch(() => {});
+  const handleInvite = async () => {
+    if (typeof window === 'undefined') return;
+    const code = generateRoomCode();
+    const roomUrl = `${window.location.origin}/room/${code}`;
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'Vanish XO Online',
+          text: `Join my Vanish XO game! Room: ${code}`,
+          url: roomUrl,
+        });
+        router.push(`/room/${code}`);
+        return;
+      } catch {
+        // Fallback to clipboard
       }
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
     }
+
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(roomUrl).catch(() => {});
+    }
+    setCopied(true);
+    setTimeout(() => {
+      setCopied(false);
+      router.push(`/room/${code}`);
+    }, 600);
   };
 
   const isXTurn = state.turn === 'X' && state.winner === null;
@@ -124,8 +146,8 @@ export const TopControls: React.FC<TopControlsProps> = ({
               type="button"
               id="invite-friend"
               aria-label="Invite a Friend"
-              onClick={handleShare}
-              className="p-2 rounded-xl bg-slate-900/80 text-slate-400 hover:text-slate-200 border border-white/5 transition-all duration-200 cursor-pointer active:scale-95"
+              onClick={handleInvite}
+              className="p-2 rounded-xl bg-slate-900/80 text-cyan-400 hover:text-cyan-300 border border-cyan-500/20 hover:border-cyan-500/40 transition-all duration-200 cursor-pointer active:scale-95"
             >
               {copied ? <Check size={18} className="text-emerald-400" /> : <Share2 size={18} />}
             </button>

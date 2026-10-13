@@ -2,10 +2,10 @@
 
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { Player } from '@/lib/game';
+import { MarkSymbol, SEAT_COLORS } from '@/lib/types';
 
 interface ParticleDissolveProps {
-  player: Player;
+  player: MarkSymbol;
   onComplete?: () => void;
 }
 
@@ -21,11 +21,9 @@ export const ParticleDissolve: React.FC<ParticleDissolveProps> = ({
   player,
   onComplete,
 }) => {
-  const isCyan = player === 'X';
-  const color = isCyan ? '#00f0ff' : '#ff007f';
-  const glow = isCyan
-    ? '0 0 10px rgba(0, 240, 255, 0.9)'
-    : '0 0 10px rgba(255, 0, 127, 0.9)';
+  const config = SEAT_COLORS[player] || SEAT_COLORS.X;
+  const color = config.hex;
+  const glow = `0 0 10px ${config.hex}`;
 
   const particles: Particle[] = useMemo(() => {
     const list: Particle[] = [];

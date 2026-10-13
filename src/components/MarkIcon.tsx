@@ -2,10 +2,10 @@
 
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Player } from '@/lib/game';
+import { MarkSymbol, SEAT_COLORS } from '@/lib/types';
 
 interface MarkIconProps {
-  player: Player;
+  player: MarkSymbol;
   ageIndex?: 0 | 1 | 2; // 0 = oldest, 1 = middle, 2 = newest
   isOldestOfThree?: boolean; // When player has 3 marks, oldest is ready to vanish
   isWinning?: boolean;
@@ -21,7 +21,7 @@ export const MarkIcon: React.FC<MarkIconProps> = ({
   isDimmed = false,
   size = 'md',
 }) => {
-  const isCyan = player === 'X';
+  const config = SEAT_COLORS[player] || SEAT_COLORS.X;
 
   // Sizing
   const sizeMap = {
@@ -32,11 +32,7 @@ export const MarkIcon: React.FC<MarkIconProps> = ({
   };
 
   // Base colors
-  const strokeColor = isWinning
-    ? '#ffd700'
-    : isCyan
-    ? '#00f0ff'
-    : '#ff007f';
+  const strokeColor = isWinning ? '#ffd700' : config.hex;
 
   // Glow filters based on age
   let glowFilter = '';
@@ -60,12 +56,12 @@ export const MarkIcon: React.FC<MarkIconProps> = ({
       // Newest: brightest and fully solid
       opacity = 1.0;
       scale = 1.0;
-      glowFilter = isCyan ? 'filter-glow-cyan' : 'filter-glow-pink';
+      glowFilter = `drop-shadow(0 0 10px ${config.hex}) drop-shadow(0 0 16px ${config.glow})`;
     } else if (ageIndex === 1) {
       // Middle: slightly dimmer
       opacity = 0.75;
       scale = 0.93;
-      glowFilter = isCyan ? 'drop-shadow(0 0 6px #00f0ff88)' : 'drop-shadow(0 0 6px #ff007f88)';
+      glowFilter = `drop-shadow(0 0 6px ${config.hex}88)`;
     } else {
       // Oldest: faded
       opacity = 0.45;
@@ -95,10 +91,11 @@ export const MarkIcon: React.FC<MarkIconProps> = ({
         filter: isWinning ? 'drop-shadow(0 0 16px #ffd700)' : undefined,
       }}
     >
-      {player === 'X' ? (
+      {player === 'X' && (
         <svg
           viewBox="0 0 100 100"
-          className={`w-full h-full ${glowFilter}`}
+          className="w-full h-full"
+          style={{ filter: glowFilter }}
           fill="none"
           stroke={strokeColor}
           strokeWidth="14"
@@ -123,10 +120,13 @@ export const MarkIcon: React.FC<MarkIconProps> = ({
             transition={{ duration: 0.2, delay: 0.05 }}
           />
         </svg>
-      ) : (
+      )}
+
+      {player === 'O' && (
         <svg
           viewBox="0 0 100 100"
-          className={`w-full h-full ${glowFilter}`}
+          className="w-full h-full"
+          style={{ filter: glowFilter }}
           fill="none"
           stroke={strokeColor}
           strokeWidth="14"
@@ -136,6 +136,50 @@ export const MarkIcon: React.FC<MarkIconProps> = ({
             cx="50"
             cy="50"
             r="32"
+            initial={{ pathLength: 0 }}
+            animate={{ pathLength: 1 }}
+            transition={{ duration: 0.25 }}
+          />
+        </svg>
+      )}
+
+      {player === '▲' && (
+        <svg
+          viewBox="0 0 100 100"
+          className="w-full h-full"
+          style={{ filter: glowFilter }}
+          fill="none"
+          stroke={strokeColor}
+          strokeWidth="13"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        >
+          <motion.polygon
+            points="50,20 84,80 16,80"
+            initial={{ pathLength: 0 }}
+            animate={{ pathLength: 1 }}
+            transition={{ duration: 0.25 }}
+          />
+        </svg>
+      )}
+
+      {player === '■' && (
+        <svg
+          viewBox="0 0 100 100"
+          className="w-full h-full"
+          style={{ filter: glowFilter }}
+          fill="none"
+          stroke={strokeColor}
+          strokeWidth="13"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        >
+          <motion.rect
+            x="24"
+            y="24"
+            width="52"
+            height="52"
+            rx="10"
             initial={{ pathLength: 0 }}
             animate={{ pathLength: 1 }}
             transition={{ duration: 0.25 }}
