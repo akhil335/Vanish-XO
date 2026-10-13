@@ -47,6 +47,16 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     return null;
   };
 
+  // Calculate grid size from board length (3x3 = 9, 5x5 = 25, 6x6 = 36)
+  const totalCells = board.length;
+  const gridSize = Math.round(Math.sqrt(totalCells)) || 3;
+
+  // Sizing & padding adaptation based on grid dimensions
+  const maxWidthClass = gridSize === 6 ? 'max-w-[440px]' : gridSize === 5 ? 'max-w-[400px]' : 'max-w-[360px]';
+  const gapClass = gridSize >= 6 ? 'gap-1.5 sm:gap-2' : gridSize === 5 ? 'gap-2 sm:gap-2.5' : 'gap-2.5 sm:gap-3.5';
+  const cellRoundedClass = gridSize >= 6 ? 'rounded-lg sm:rounded-xl' : gridSize === 5 ? 'rounded-xl' : 'rounded-2xl';
+  const markSize = gridSize >= 5 ? 'sm' : 'md';
+
   // Board edge glow based on active turn (No turn text!)
   const boardBorderColor = winner !== null ? '#ffd700' : turnConfig.hex;
   const boardShadowGlow =
@@ -55,7 +65,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       : `0 0 30px ${turnConfig.glow}`;
 
   return (
-    <div className="relative w-full max-w-[360px] aspect-square mx-auto p-2 sm:p-3 select-none">
+    <div className={`relative w-full ${maxWidthClass} aspect-square mx-auto p-2 sm:p-3 select-none transition-all duration-300`}>
       {/* Dynamic Ambient Edge Glow Aura */}
       <div
         className="absolute inset-0 rounded-3xl transition-all duration-500 pointer-events-none blur-xl opacity-35"
@@ -66,14 +76,15 @@ export const GameBoard: React.FC<GameBoardProps> = ({
 
       {/* Main Grid Frame */}
       <div
-        className="relative w-full h-full rounded-3xl p-3 bg-[#0a0d17]/90 backdrop-blur-md border-2 transition-all duration-300 grid grid-cols-3 grid-rows-3 gap-2.5 sm:gap-3.5"
+        className={`relative w-full h-full rounded-3xl p-2.5 sm:p-3 bg-[#0a0d17]/90 backdrop-blur-md border-2 transition-all duration-300 grid ${gapClass}`}
         style={{
           borderColor: boardBorderColor,
           boxShadow: boardShadowGlow,
+          gridTemplateColumns: `repeat(${gridSize}, minmax(0, 1fr))`,
+          gridTemplateRows: `repeat(${gridSize}, minmax(0, 1fr))`,
         }}
       >
-        {Array.from({ length: 9 }).map((_, index) => {
-          const mark = board[index];
+        {board.map((mark, index) => {
           const isWinningCell = winningLine ? winningLine.includes(index) : false;
           const isDimmed = winner !== null && !isWinningCell;
           const ageInfo = getAge(index);
@@ -91,7 +102,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
               onClick={() => onCellClick(index)}
               whileHover={isClickable ? { scale: 1.02, backgroundColor: 'rgba(30, 41, 59, 0.7)' } : {}}
               whileTap={isClickable ? { scale: 0.96 } : {}}
-              className={`relative flex items-center justify-center rounded-2xl transition-all duration-200 select-none overflow-hidden touch-manipulation cursor-pointer ${
+              className={`relative flex items-center justify-center ${cellRoundedClass} transition-all duration-200 select-none overflow-hidden touch-manipulation cursor-pointer ${
                 mark
                   ? 'bg-slate-900/60 border border-white/5'
                   : 'bg-slate-900/30 border border-white/[0.04] hover:border-white/20 active:bg-slate-800/40'
@@ -109,7 +120,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                   isOldestOfThree={ageInfo?.isOldestOfThree}
                   isWinning={isWinningCell}
                   isDimmed={isDimmed}
-                  size="md"
+                  size={markSize}
                 />
               )}
 
@@ -124,7 +135,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
               {/* Empty Cell Hover preview hint for current player */}
               {isClickable && (
                 <div
-                  className="w-2.5 h-2.5 rounded-full opacity-0 hover:opacity-40 transition-opacity duration-200 pointer-events-none"
+                  className="w-2 h-2 rounded-full opacity-0 hover:opacity-40 transition-opacity duration-200 pointer-events-none"
                   style={{
                     backgroundColor: turnConfig.hex,
                     boxShadow: `0 0 8px ${turnConfig.hex}`,

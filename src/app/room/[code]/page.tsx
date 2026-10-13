@@ -191,8 +191,8 @@ function RoomPageContent() {
     );
   }
 
-  // Can start check
   const allReadyToStart = roomState.seats.every((s) => s.isBot || (s.playerId && s.isReady));
+  const contentWidth = roomState.seatsCount === 4 ? 'max-w-[440px]' : roomState.seatsCount === 3 ? 'max-w-[400px]' : 'max-w-[360px]';
 
   return (
     <main className="min-h-screen w-full flex flex-col items-center justify-between px-3 py-4 select-none overflow-x-hidden">
@@ -200,9 +200,9 @@ function RoomPageContent() {
       <ToastNotification toasts={toasts} />
 
       {/* Main Room Container */}
-      <div className="w-full max-w-md flex flex-col items-center gap-3 my-auto">
+      <div className={`w-full ${contentWidth} flex flex-col items-center gap-3 my-auto transition-all duration-300`}>
         {/* Header Bar */}
-        <div className="w-full max-w-[360px] flex items-center justify-between px-1">
+        <div className="w-full flex items-center justify-between px-1">
           <Link
             href="/"
             className="p-2 rounded-xl bg-slate-900/80 border border-white/5 text-slate-400 hover:text-white transition-all cursor-pointer"
@@ -243,7 +243,7 @@ function RoomPageContent() {
         )}
 
         {/* Online Player Bar & Turn Countdown */}
-        <div className="w-full max-w-[360px]">
+        <div className="w-full">
           <OnlinePlayerBar
             roomState={roomState}
             mySeatIndex={mySeatIndex}
@@ -255,7 +255,7 @@ function RoomPageContent() {
 
         {/* Lobby Waiting Controls for Host */}
         {roomState.status === 'waiting' && isHost && (
-          <div className="w-full max-w-[360px] flex items-center justify-between gap-2 p-2 bg-slate-900/80 rounded-2xl border border-white/10 backdrop-blur-md">
+          <div className="w-full flex items-center justify-between gap-2 p-2 bg-slate-900/80 rounded-2xl border border-white/10 backdrop-blur-md">
             {/* Seats count toggle: 2, 3, 4 */}
             <div className="flex items-center gap-1 bg-black/40 p-1 rounded-xl">
               <Users size={14} className="text-slate-400 ml-1 mr-0.5" />

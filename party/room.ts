@@ -3,11 +3,15 @@ import {
   ServerMessage,
   ClientMessageSchema,
   ClientMessage,
+  MarkSymbol,
 } from '../src/lib/types';
 import {
+  createGame,
   createInitialRoomState,
   placeRoomMark,
   getAvailableRoomMoves,
+  getLegalMoves,
+  advanceRoomTurn,
   getRoomBotMove,
   resetRoomForRematch,
   createInitialRoomSeats,
@@ -212,7 +216,11 @@ export class GameRoomHandler {
       }
     }
 
+    // Rebuild game config and board using createGame(seatsCount) BEFORE game starts
+    const newGame = createGame(seatsCount);
     this.state.seatsCount = seatsCount;
+    this.state.config = newGame.config;
+    this.state.board = newGame.board as (MarkSymbol | null)[];
     this.state.seats = newSeats;
     this.broadcast({ type: 'state', state: this.state });
     return { success: true };
@@ -344,12 +352,19 @@ export class GameRoomHandler {
 
   /**
    * Automatically executes a move for the specified seat.
+   * Safety rule: if no legal move exists for any reason, auto-skips turn and broadcasts state.
    */
   public autoPlayMove(seatIndex: number, now: number = Date.now()): boolean {
     if (this.state.status !== 'playing' || this.state.turnSeatIndex !== seatIndex) return false;
 
-    const available = getAvailableRoomMoves(this.state);
-    if (available.length === 0) return false;
+    const available = getLegalMoves(this.state);
+    if (available.length === 0) {
+      // Server: if a player has no legal move for any reason, auto-skip their turn and broadcast the state
+      this.state = advanceRoomTurn(this.state, now);
+      this.broadcast({ type: 'state', state: this.state });
+      this.checkAndTriggerBotMove(now);
+      return true;
+    }
 
     // Use smart bot move or fallback to random
     let move = getRoomBotMove(this.state, seatIndex);
@@ -368,7 +383,17 @@ export class GameRoomHandler {
   }
 
   private checkAndTriggerBotMove(now: number) {
-    if (this.state.status !== 'playing') return;
+    if (this.state.status !== 'playing' || this.state.winner !== null) return;
+
+    // Safety rule: if current player has no legal move for any reason, auto-skip their turn immediately
+    const available = getLegalMoves(this.state);
+    if (available.length === 0) {
+      this.state = advanceRoomTurn(this.state, now);
+      this.broadcast({ type: 'state', state: this.state });
+      this.checkAndTriggerBotMove(now);
+      return;
+    }
+
     const currentSeat = this.state.seats[this.state.turnSeatIndex];
     if (currentSeat && currentSeat.isBot) {
       // Execute bot move

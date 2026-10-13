@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
+  createGame,
   createInitialState,
+  getConfigForPlayers,
+  getLegalMoves,
   placeMark,
   getNextVanish,
   getWinner,
@@ -251,5 +254,73 @@ describe('Vanish XO - Core Game Logic & Rules', () => {
     expect(getWinner([0, 4, 8])).toEqual({ winner: true, line: [0, 4, 8] });
     expect(getWinner([0, 1, 5])).toEqual({ winner: false, line: null });
     expect(getWinner([0, 1])).toEqual({ winner: false, line: null });
+  });
+
+  describe('Board Configuration & Safety Rules', () => {
+    it('createGame for 2, 3 and 4 players returns the right board size', () => {
+      // 2 players = 3x3 board (9 cells)
+      const game2 = createGame(2);
+      expect(game2.board.length).toBe(9);
+      expect(game2.config.gridSize).toBe(3);
+      expect(game2.config.totalCells).toBe(9);
+      expect(game2.config.playerCount).toBe(2);
+
+      // 3 players = 5x5 board (25 cells)
+      const game3 = createGame(3);
+      expect(game3.board.length).toBe(25);
+      expect(game3.config.gridSize).toBe(5);
+      expect(game3.config.totalCells).toBe(25);
+      expect(game3.config.playerCount).toBe(3);
+
+      // 4 players = 6x6 board (36 cells)
+      const game4 = createGame(4);
+      expect(game4.board.length).toBe(36);
+      expect(game4.config.gridSize).toBe(6);
+      expect(game4.config.totalCells).toBe(36);
+      expect(game4.config.playerCount).toBe(4);
+
+      // getConfigForPlayers matches
+      expect(getConfigForPlayers(2).totalCells).toBe(9);
+      expect(getConfigForPlayers(3).totalCells).toBe(25);
+      expect(getConfigForPlayers(4).totalCells).toBe(36);
+    });
+
+    it('createGame validates boardCells > players * marksPerPlayer', () => {
+      // 4 players * 3 marks = 12 marks. 9 cells is invalid (9 <= 12)
+      expect(() => {
+        createGame({
+          playerCount: 4,
+          gridSize: 3,
+          totalCells: 9,
+          marksPerPlayer: 3,
+          winStreak: 3,
+        });
+      }).toThrow(/must be strictly greater than players \* marksPerPlayer/);
+    });
+
+    it('a full board still produces a legal move by removing oldest mark first', () => {
+      const state = createGame(2);
+      // Manually simulate a full board with 9 occupied cells (non-winning configuration)
+      state.board = ['X', 'X', 'O', 'O', 'O', 'X', 'X', 'O', 'X'];
+      state.movesX = [0, 1, 5];
+      state.movesO = [2, 3, 4];
+      state.turn = 'X';
+
+      // Confirm no empty cell exists
+      expect(state.board.every((c) => c !== null)).toBe(true);
+
+      // getLegalMoves must return the cell of X's oldest mark (cell 0)
+      const legalMoves = getLegalMoves(state);
+      expect(legalMoves).toEqual([0]);
+
+      // Placing at the freed cell succeeds: cell 0 vanishes and is placed with X
+      const { nextState, success } = placeMark(state, 0);
+      expect(success).toBe(true);
+      expect(nextState.lastVanished).toEqual({ player: 'X', cell: 0 });
+      expect(nextState.board[0]).toBe('X');
+      expect(nextState.movesX).toEqual([1, 5, 0]);
+      expect(nextState.winner).toBeNull();
+      expect(nextState.turn).toBe('O');
+    });
   });
 });

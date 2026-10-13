@@ -11,6 +11,14 @@ export const SEAT_COLORS: Record<MarkSymbol, { hex: string; glow: string; textGl
   '■': { hex: '#b026ff', glow: 'rgba(176, 38, 255, 0.4)', textGlow: '0 0 10px rgba(176, 38, 255, 0.8)' },
 };
 
+export interface GameConfig {
+  playerCount: number;
+  gridSize: number;
+  totalCells: number;
+  marksPerPlayer: number;
+  winStreak: number;
+}
+
 export interface PlayerSeat {
   seatIndex: number;
   symbol: MarkSymbol;
@@ -30,6 +38,7 @@ export interface RoomState {
   roomCode: string;
   status: 'waiting' | 'playing' | 'finished';
   seatsCount: 2 | 3 | 4;
+  config: GameConfig;
   seats: PlayerSeat[];
   hostPlayerId: string | null;
   board: (MarkSymbol | null)[];
@@ -68,7 +77,7 @@ export const ClientMessageSchema = z.discriminatedUnion('type', [
   }),
   z.object({
     type: z.literal('place'),
-    cell: z.number().int().min(0).max(8),
+    cell: z.number().int().min(0).max(35),
   }),
   z.object({
     type: z.literal('rematch'),

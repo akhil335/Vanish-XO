@@ -1,4 +1,5 @@
 import {
+  GameConfig,
   MarkSymbol,
   MARK_SYMBOLS,
   PlayerSeat,
@@ -8,16 +9,71 @@ import {
 
 export type Player = 'X' | 'O';
 
-export const WINNING_LINES: readonly [number, number, number][] = [
-  [0, 1, 2], // Row 1
-  [3, 4, 5], // Row 2
-  [6, 7, 8], // Row 3
-  [0, 3, 6], // Col 1
-  [1, 4, 7], // Col 2
-  [2, 5, 8], // Col 3
-  [0, 4, 8], // Diag 1
-  [2, 4, 6], // Diag 2
-];
+export function getConfigForPlayers(playerCount: number): GameConfig {
+  const count = Math.max(2, Math.min(4, Math.round(playerCount)));
+  let gridSize = 3;
+  if (count === 3) {
+    gridSize = 5;
+  } else if (count === 4) {
+    gridSize = 6;
+  }
+
+  return {
+    playerCount: count,
+    gridSize,
+    totalCells: gridSize * gridSize,
+    marksPerPlayer: 3,
+    winStreak: 3,
+  };
+}
+
+const WINNING_LINES_CACHE = new Map<number, [number, number, number][]>();
+
+/**
+ * Generates all winning lines of streak length (default 3) for a given gridSize.
+ */
+export function getWinningLines(gridSize: number = 3, streak: number = 3): [number, number, number][] {
+  const cacheKey = gridSize * 100 + streak;
+  const cached = WINNING_LINES_CACHE.get(cacheKey);
+  if (cached) return cached;
+
+  const lines: [number, number, number][] = [];
+  const N = gridSize;
+  const K = streak;
+
+  // 1. Horizontal
+  for (let r = 0; r < N; r++) {
+    for (let c = 0; c <= N - K; c++) {
+      lines.push([r * N + c, r * N + c + 1, r * N + c + 2]);
+    }
+  }
+
+  // 2. Vertical
+  for (let c = 0; c < N; c++) {
+    for (let r = 0; r <= N - K; r++) {
+      lines.push([r * N + c, (r + 1) * N + c, (r + 2) * N + c]);
+    }
+  }
+
+  // 3. Diagonal (top-left to bottom-right)
+  for (let r = 0; r <= N - K; r++) {
+    for (let c = 0; c <= N - K; c++) {
+      lines.push([r * N + c, (r + 1) * N + (c + 1), (r + 2) * N + (c + 2)]);
+    }
+  }
+
+  // 4. Anti-diagonal (top-right to bottom-left)
+  for (let r = 0; r <= N - K; r++) {
+    for (let c = K - 1; c < N; c++) {
+      lines.push([r * N + c, (r + 1) * N + (c - 1), (r + 2) * N + (c - 2)]);
+    }
+  }
+
+  WINNING_LINES_CACHE.set(cacheKey, lines);
+  return lines;
+}
+
+export const WINNING_LINES = getWinningLines(3, 3);
 
 export interface VanishedInfo {
   player: Player;
@@ -25,6 +81,7 @@ export interface VanishedInfo {
 }
 
 export interface GameState {
+  config: GameConfig;
   board: (Player | null)[];
   movesX: number[]; // oldest at index 0, newest at end (max 3)
   movesO: number[]; // oldest at index 0, newest at end (max 3)
@@ -35,17 +92,47 @@ export interface GameState {
   moveCount: number;
 }
 
-export function createInitialState(startingPlayer: Player = 'X'): GameState {
+/**
+ * Creates a new GameState according to the provided config or player count.
+ * Safety validation: boardCells must be strictly greater than players * marksPerPlayer.
+ * In development, throws an Error if invalid.
+ * In production, falls back to the correct config for the player count.
+ */
+export function createGame(configOrPlayers: GameConfig | number = 2): GameState {
+  let config: GameConfig;
+  if (typeof configOrPlayers === 'number') {
+    config = getConfigForPlayers(configOrPlayers);
+  } else {
+    config = { ...configOrPlayers };
+  }
+
+  const minRequiredCells = config.playerCount * config.marksPerPlayer;
+  if (config.totalCells <= minRequiredCells) {
+    const errorMsg = `Invalid game config: boardCells (${config.totalCells}) must be strictly greater than players * marksPerPlayer (${minRequiredCells})`;
+    if (process.env.NODE_ENV !== 'production') {
+      throw new Error(errorMsg);
+    } else {
+      config = getConfigForPlayers(config.playerCount);
+    }
+  }
+
   return {
-    board: Array(9).fill(null),
+    config,
+    board: Array(config.totalCells).fill(null),
     movesX: [],
     movesO: [],
-    turn: startingPlayer,
+    turn: 'X',
     winner: null,
     winningLine: null,
     lastVanished: null,
     moveCount: 0,
   };
+}
+
+export function createInitialState(startingPlayer: Player = 'X', configInput: GameConfig | number = 2): GameState {
+  const state = createGame(configInput);
+  state.turn = startingPlayer;
+  return state;
 }
 
 /**
@@ -63,10 +150,11 @@ export function getNextVanish(state: GameState, player: Player): number | null {
 /**
  * Checks if the given list of cell indices contains any winning line.
  */
-export function checkWin(moves: number[]): [number, number, number] | null {
+export function checkWin(moves: number[], gridSize: number = 3): [number, number, number] | null {
   if (moves.length < 3) return null;
   const moveSet = new Set(moves);
-  for (const line of WINNING_LINES) {
+  const lines = getWinningLines(gridSize, 3);
+  for (const line of lines) {
     if (moveSet.has(line[0]) && moveSet.has(line[1]) && moveSet.has(line[2])) {
       return line;
     }
@@ -77,33 +165,72 @@ export function checkWin(moves: number[]): [number, number, number] | null {
 /**
  * Pure function to get winner info from a player's moves list.
  */
-export function getWinner(moves: number[]): { winner: boolean; line: [number, number, number] | null } {
-  const line = checkWin(moves);
+export function getWinner(moves: number[], gridSize: number = 3): { winner: boolean; line: [number, number, number] | null } {
+  const line = checkWin(moves, gridSize);
   return { winner: line !== null, line };
 }
 
 /**
- * Returns list of empty cell indices on the board.
+ * Returns list of legal cell moves for the current player.
+ * Safety rule:
+ * - If board has empty cells, return all empty cells.
+ * - If the board has NO empty cells, the current player's oldest mark is removed first
+ *   (vanish happens BEFORE placement), and that freed cell becomes the only legal move.
  */
-export function getAvailableMoves(state: GameState): number[] {
-  if (state.winner !== null) return [];
-  const available: number[] = [];
-  for (let i = 0; i < 9; i++) {
+export function getLegalMoves(state: GameState | RoomState): number[] {
+  if ('winner' in state && state.winner !== null) return [];
+  if ('status' in state && state.status === 'finished') return [];
+
+  // 1. Check empty cells on board
+  const emptyCells: number[] = [];
+  for (let i = 0; i < state.board.length; i++) {
     if (state.board[i] === null) {
-      available.push(i);
+      emptyCells.push(i);
     }
   }
-  return available;
+
+  if (emptyCells.length > 0) {
+    return emptyCells;
+  }
+
+  // 2. Full board: current player's oldest mark is removed first,
+  // and that freed cell becomes the only legal move.
+  if ('movesX' in state) {
+    // GameState
+    const moves = state.turn === 'X' ? state.movesX : state.movesO;
+    if (moves.length > 0) {
+      return [moves[0]];
+    }
+    return [];
+  } else {
+    // RoomState
+    const currentSeat = state.seats[state.turnSeatIndex];
+    if (!currentSeat) return [];
+    const moves = state.playerMoves[currentSeat.symbol] || [];
+    if (moves.length > 0) {
+      return [moves[0]];
+    }
+    return [];
+  }
+}
+
+/**
+ * Returns list of empty cell indices on the board (alias for getLegalMoves).
+ */
+export function getAvailableMoves(state: GameState): number[] {
+  return getLegalMoves(state);
 }
 
 /**
  * Places a mark for the current turn player.
  * Rule:
- * 1. Validate move (game active, cell in bounds, cell empty).
- * 2. If the current player has 3 marks, remove the OLDEST mark first.
- * 3. Add the new mark to the board and to the player's queue.
- * 4. Check for a win AFTER removal and placement.
- * 5. Switch turn if game is not won.
+ * 1. Validate move (game active, cell in bounds).
+ * 2. If the current player has 3 marks (or board has no empty cells and player has marks),
+ *    remove the OLDEST mark FIRST (vanish happens BEFORE placement).
+ * 3. Validate cell is empty after vanish.
+ * 4. Add the new mark to the board and to the player's queue.
+ * 5. Check for a win AFTER removal and placement.
+ * 6. Switch turn if game is not won.
  */
 export function placeMark(
   state: GameState,
@@ -112,11 +239,8 @@ export function placeMark(
   if (state.winner !== null) {
     return { nextState: state, success: false, error: 'Game is already over' };
   }
-  if (cellIndex < 0 || cellIndex > 8) {
+  if (cellIndex < 0 || cellIndex >= state.board.length) {
     return { nextState: state, success: false, error: 'Invalid cell index' };
-  }
-  if (state.board[cellIndex] !== null) {
-    return { nextState: state, success: false, error: 'Cell is already occupied' };
   }
 
   const currentPlayer = state.turn;
@@ -125,33 +249,48 @@ export function placeMark(
   let newMovesO = [...state.movesO];
   let lastVanished: VanishedInfo | null = null;
 
+  const isBoardFull = !newBoard.some((c) => c === null);
+
+  // Vanish happens BEFORE placement
   if (currentPlayer === 'X') {
-    if (newMovesX.length >= 3) {
+    if (newMovesX.length >= 3 || (isBoardFull && newMovesX.length > 0)) {
       const oldestCell = newMovesX[0];
       newBoard[oldestCell] = null;
       newMovesX = newMovesX.slice(1);
       lastVanished = { player: 'X', cell: oldestCell };
     }
-    newBoard[cellIndex] = 'X';
-    newMovesX.push(cellIndex);
   } else {
-    if (newMovesO.length >= 3) {
+    if (newMovesO.length >= 3 || (isBoardFull && newMovesO.length > 0)) {
       const oldestCell = newMovesO[0];
       newBoard[oldestCell] = null;
       newMovesO = newMovesO.slice(1);
       lastVanished = { player: 'O', cell: oldestCell };
     }
+  }
+
+  // Check if cell is occupied after vanish
+  if (newBoard[cellIndex] !== null) {
+    return { nextState: state, success: false, error: 'Cell is already occupied' };
+  }
+
+  // Place new mark
+  if (currentPlayer === 'X') {
+    newBoard[cellIndex] = 'X';
+    newMovesX.push(cellIndex);
+  } else {
     newBoard[cellIndex] = 'O';
     newMovesO.push(cellIndex);
   }
 
   // Check win for the player who just moved
+  const gridSize = state.config?.gridSize || Math.round(Math.sqrt(state.board.length));
   const movesToCheck = currentPlayer === 'X' ? newMovesX : newMovesO;
-  const winningLine = checkWin(movesToCheck);
+  const winningLine = checkWin(movesToCheck, gridSize);
   const winner = winningLine ? currentPlayer : null;
   const nextTurn = winner ? currentPlayer : (currentPlayer === 'X' ? 'O' : 'X');
 
   const nextState: GameState = {
+    config: state.config || getConfigForPlayers(2),
     board: newBoard,
     movesX: newMovesX,
     movesO: newMovesO,
@@ -486,6 +625,7 @@ export function createInitialRoomState(
   hostPlayerId: string | null = null,
   seatsCount: 2 | 3 | 4 = 2
 ): RoomState {
+  const baseGame = createGame(seatsCount);
   const seats = createInitialRoomSeats(seatsCount, hostPlayerId);
   const playerMoves: Record<MarkSymbol, number[]> = {
     X: [],
@@ -498,9 +638,10 @@ export function createInitialRoomState(
     roomCode,
     status: 'waiting',
     seatsCount,
+    config: baseGame.config,
     seats,
     hostPlayerId,
-    board: Array(9).fill(null),
+    board: baseGame.board as (MarkSymbol | null)[],
     playerMoves,
     turnSeatIndex: 0,
     turnStartedAt: Date.now(),
@@ -514,14 +655,7 @@ export function createInitialRoomState(
 }
 
 export function getAvailableRoomMoves(state: RoomState): number[] {
-  if (state.winner !== null) return [];
-  const available: number[] = [];
-  for (let i = 0; i < 9; i++) {
-    if (state.board[i] === null) {
-      available.push(i);
-    }
-  }
-  return available;
+  return getLegalMoves(state);
 }
 
 export function getNextVanishForSymbol(state: RoomState, symbol: MarkSymbol): number | null {
@@ -563,8 +697,8 @@ export function getMarkAgeForSymbol(
  * Enforces:
  * 1. Correct game status ('playing')
  * 2. Correct turn seat
- * 3. Legal, empty cell
- * 4. Vanishing mark removal BEFORE win check
+ * 3. Legal cell index (within state.board.length)
+ * 4. Vanishing mark removal BEFORE win check (and before placement)
  * 5. Win detection or turn rotation
  */
 export function placeRoomMark(
@@ -582,11 +716,8 @@ export function placeRoomMark(
   if (state.turnSeatIndex !== seatIndex) {
     return { nextState: state, success: false, error: 'Not your turn' };
   }
-  if (cellIndex < 0 || cellIndex > 8) {
+  if (cellIndex < 0 || cellIndex >= state.board.length) {
     return { nextState: state, success: false, error: 'Invalid cell index' };
-  }
-  if (state.board[cellIndex] !== null) {
-    return { nextState: state, success: false, error: 'Cell is already occupied' };
   }
 
   const currentSeat = state.seats[seatIndex];
@@ -604,26 +735,34 @@ export function placeRoomMark(
   };
 
   let lastVanished: VanishedEvent | null = null;
-  const movesForSymbol = newPlayerMoves[symbol];
+  let movesForSymbol = newPlayerMoves[symbol];
+  const isBoardFull = !newBoard.some((c) => c === null);
 
-  // 1. If symbol already has 3 marks, oldest vanishes FIRST
-  if (movesForSymbol.length >= 3) {
+  // 1. If symbol already has 3 marks (or board has no empty cells and player has marks), oldest vanishes FIRST
+  if (movesForSymbol.length >= 3 || (isBoardFull && movesForSymbol.length > 0)) {
     const oldestCell = movesForSymbol[0];
     newBoard[oldestCell] = null;
-    newPlayerMoves[symbol] = movesForSymbol.slice(1);
+    movesForSymbol = movesForSymbol.slice(1);
+    newPlayerMoves[symbol] = movesForSymbol;
     lastVanished = { symbol, cell: oldestCell };
   }
 
-  // 2. Place new mark
+  // 2. Validate cell is empty after vanish
+  if (newBoard[cellIndex] !== null) {
+    return { nextState: state, success: false, error: 'Cell is already occupied' };
+  }
+
+  // 3. Place new mark
   newBoard[cellIndex] = symbol;
   newPlayerMoves[symbol].push(cellIndex);
 
-  // 3. Check win for symbol
-  const winningLine = checkWin(newPlayerMoves[symbol]);
+  // 4. Check win for symbol
+  const gridSize = state.config?.gridSize || getConfigForPlayers(state.seatsCount).gridSize;
+  const winningLine = checkWin(newPlayerMoves[symbol], gridSize);
   const winner = winningLine ? symbol : null;
   const nextStatus = winner ? 'finished' : 'playing';
 
-  // 4. Rotate turn to next seat if game continues
+  // 5. Rotate turn to next seat if game continues
   const nextTurnSeatIndex = winner
     ? state.turnSeatIndex
     : (state.turnSeatIndex + 1) % state.seatsCount;
@@ -661,9 +800,11 @@ export function advanceRoomTurn(state: RoomState, timestamp: number = Date.now()
  */
 export function resetRoomForRematch(state: RoomState, timestamp: number = Date.now()): RoomState {
   const nextStartingSeat = (state.startingSeatIndex + 1) % state.seatsCount;
+  const newGame = createGame(state.config || state.seatsCount);
   return {
     ...state,
-    board: Array(9).fill(null),
+    config: newGame.config,
+    board: newGame.board as (MarkSymbol | null)[],
     playerMoves: {
       X: [],
       O: [],
@@ -687,7 +828,7 @@ export function resetRoomForRematch(state: RoomState, timestamp: number = Date.n
  * - Strategic center/corners/random fallback
  */
 export function getRoomBotMove(state: RoomState, seatIndex: number): number {
-  const available = getAvailableRoomMoves(state);
+  const available = getLegalMoves(state);
   if (available.length === 0) return -1;
 
   const botSymbol = state.seats[seatIndex].symbol;
@@ -715,11 +856,16 @@ export function getRoomBotMove(state: RoomState, seatIndex: number): number {
     }
   }
 
-  // 3. Prefer center
-  if (available.includes(4)) return 4;
+  // 3. Strategic fallback: prefer center
+  const gridSize = state.config?.gridSize || getConfigForPlayers(state.seatsCount).gridSize;
+  const mid = Math.floor(gridSize / 2);
+  const centerCell = mid * gridSize + mid;
+  if (available.includes(centerCell)) return centerCell;
 
-  // 4. Prefer corners
-  const corners = [0, 2, 6, 8].filter((c) => available.includes(c));
+  // Prefer corners
+  const corners = [0, gridSize - 1, (gridSize - 1) * gridSize, gridSize * gridSize - 1].filter((c) =>
+    available.includes(c)
+  );
   if (corners.length > 0) {
     return corners[Math.floor(Math.random() * corners.length)];
   }

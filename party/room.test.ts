@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { GameRoomHandler } from './room';
 import { ServerMessage } from '../src/lib/types';
+import { getLegalMoves } from '../src/lib/game';
 
 describe('Vanish XO - PartyKit Server Message Handler', () => {
   let room: GameRoomHandler;
@@ -192,5 +193,73 @@ describe('Vanish XO - PartyKit Server Message Handler', () => {
     // Starting seat rotated from 0 to 1!
     expect(room.state.startingSeatIndex).toBe(1);
     expect(room.state.turnSeatIndex).toBe(1);
+  });
+
+  it('creates a 4-seat room (2 humans + 2 bots), plays 200 random moves, and asserts the game never stalls', () => {
+    // 1. Host joins (conn1)
+    room.handleMessage('conn1', JSON.stringify({ type: 'join', playerId: 'human1' }));
+
+    // 2. Host configures room for 4 seats
+    room.handleMessage('conn1', JSON.stringify({ type: 'set_seats', seatsCount: 4 }));
+    expect(room.state.seatsCount).toBe(4);
+    expect(room.state.board.length).toBe(36); // 6x6 board!
+
+    // 3. Human 2 joins (conn2)
+    room.handleMessage('conn2', JSON.stringify({ type: 'join', playerId: 'human2' }));
+    expect(room.state.seats[1].playerId).toBe('human2');
+
+    // 4. Host sets seats 2 and 3 as bots
+    room.handleMessage('conn1', JSON.stringify({ type: 'set_bot_seat', seatIndex: 2, isBot: true }));
+    room.handleMessage('conn1', JSON.stringify({ type: 'set_bot_seat', seatIndex: 3, isBot: true }));
+    expect(room.state.seats[2].isBot).toBe(true);
+    expect(room.state.seats[3].isBot).toBe(true);
+
+    // 5. Human 2 is ready and host starts game
+    room.handleMessage('conn2', JSON.stringify({ type: 'ready', ready: true }));
+    const startRes = room.handleMessage('conn1', JSON.stringify({ type: 'start' }));
+    expect(startRes.success).toBe(true);
+    expect(room.state.status).toBe('playing');
+
+    // 6. Play 200 random moves
+    let simTime = 100000;
+    let movesPlayed = 0;
+    const maxMoves = 200;
+    let iterations = 0;
+
+    while (movesPlayed < maxMoves && iterations < 3000) {
+      iterations++;
+      simTime += 200;
+
+      // If a player won, trigger rematch and continue playing
+      if (room.state.status === 'finished') {
+        const rematchRes = room.handleMessage('conn1', JSON.stringify({ type: 'rematch' }), simTime);
+        expect(rematchRes.success).toBe(true);
+        expect(room.state.status).toBe('playing');
+        continue;
+      }
+
+      const turnSeat = room.state.seats[room.state.turnSeatIndex];
+      const legalMoves = getLegalMoves(room.state);
+
+      // SAFETY ASSERTION: A legal move MUST always exist!
+      expect(legalMoves.length).toBeGreaterThan(0);
+
+      const randomCell = legalMoves[Math.floor(Math.random() * legalMoves.length)];
+
+      if (turnSeat.isBot) {
+        // Bot auto plays move
+        const botSuccess = room.autoPlayMove(turnSeat.seatIndex, simTime);
+        expect(botSuccess).toBe(true);
+        movesPlayed++;
+      } else {
+        // Human plays move
+        const conn = turnSeat.seatIndex === 0 ? 'conn1' : 'conn2';
+        const placeRes = room.handleMessage(conn, JSON.stringify({ type: 'place', cell: randomCell }), simTime);
+        expect(placeRes.success).toBe(true);
+        movesPlayed++;
+      }
+    }
+
+    expect(movesPlayed).toBeGreaterThanOrEqual(maxMoves);
   });
 });
