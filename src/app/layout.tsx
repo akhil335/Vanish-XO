@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
+import { getSiteUrl } from "@/lib/config";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -20,10 +22,41 @@ export const viewport: Viewport = {
   userScalable: false,
 };
 
+const siteUrl = getSiteUrl();
+
 export const metadata: Metadata = {
+  metadataBase: new URL(siteUrl),
+  alternates: {
+    canonical: "/",
+  },
   title: "Vanish XO - Free Online Tic Tac Toe with a Twist",
   description:
     "Play Vanish XO online – a high-energy neon tactical twist on Tic-Tac-Toe where each player can only have 3 marks. Placing a 4th mark makes your oldest mark vanish. No draws!",
+  icons: {
+    icon: [
+      { url: '/favicon.ico', sizes: 'any' },
+      { url: '/favicon.svg', type: 'image/svg+xml' },
+      { url: '/favicon-16x16.png', sizes: '16x16', type: 'image/png' },
+      { url: '/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
+      { url: '/icon-192x192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/icon-512x512.png', sizes: '512x512', type: 'image/png' },
+    ],
+    apple: [
+      { url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' },
+    ],
+    other: [
+      {
+        rel: 'mask-icon',
+        url: '/safari-pinned-tab.svg',
+        color: '#00f0ff',
+      },
+    ],
+  },
+  manifest: '/manifest.webmanifest',
+  verification: {
+    // Provide ONLY the token string, not the full "google-site-verification=" string
+    google: '4wilxwGENfcmXsUyw27Co9NHAFfxOtPm-BNhAbqPPmw',
+  },
   keywords: [
     "Vanish XO",
     "Tic Tac Toe with a twist",
@@ -41,6 +74,7 @@ export const metadata: Metadata = {
     type: "website",
     locale: "en_US",
     siteName: "Vanish XO",
+    url: siteUrl,
   },
   twitter: {
     card: "summary_large_image",
@@ -66,6 +100,7 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col bg-[#06080d] text-slate-100 selection:bg-cyan-500/30 selection:text-cyan-200">
         {children}
+        <Analytics />
       </body>
     </html>
   );

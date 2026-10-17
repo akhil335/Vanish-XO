@@ -15,7 +15,6 @@ interface MarkIconProps {
 
 export const MarkIcon: React.FC<MarkIconProps> = ({
   player,
-  ageIndex = 2,
   isOldestOfThree = false,
   isWinning = false,
   isDimmed = false,
@@ -31,8 +30,8 @@ export const MarkIcon: React.FC<MarkIconProps> = ({
     hero: 'w-28 h-28 sm:w-36 sm:h-36',
   };
 
-  // Base colors
-  const strokeColor = isWinning ? '#ffd700' : config.hex;
+  // Base colors - always preserve the player symbol's authentic neon color
+  const strokeColor = config.hex;
 
   // Glow filters based on age
   let glowFilter = '';
@@ -40,38 +39,25 @@ export const MarkIcon: React.FC<MarkIconProps> = ({
   let scale = 1;
 
   if (isWinning) {
-    glowFilter = 'filter-glow-gold';
+    glowFilter = `drop-shadow(0 0 12px ${config.hex}) drop-shadow(0 0 24px ${config.glow})`;
     opacity = 1;
     scale = 1.08;
   } else if (isDimmed) {
-    opacity = 0.15;
-    scale = 0.9;
+    opacity = 0.28;
+    scale = 0.92;
   } else if (isOldestOfThree) {
-    // VISUAL TEACHING 1: When a player has 3 marks, their OLDEST mark pulses, is dimmer, slightly smaller
-    opacity = 0.45;
-    scale = 0.82;
+    // Only the oldest of three gets the warning - clear pulse, high contrast for bright light visibility
+    opacity = 0.95;
+    scale = 0.96;
+    glowFilter = `drop-shadow(0 0 10px ${config.hex}) drop-shadow(0 0 18px ${config.glow})`;
   } else {
-    // VISUAL TEACHING 2: All marks show age
-    if (ageIndex === 2) {
-      // Newest: brightest and fully solid
-      opacity = 1.0;
-      scale = 1.0;
-      glowFilter = `drop-shadow(0 0 10px ${config.hex}) drop-shadow(0 0 16px ${config.glow})`;
-    } else if (ageIndex === 1) {
-      // Middle: slightly dimmer
-      opacity = 0.75;
-      scale = 0.93;
-      glowFilter = `drop-shadow(0 0 6px ${config.hex}88)`;
-    } else {
-      // Oldest: faded
-      opacity = 0.45;
-      scale = 0.86;
-      glowFilter = 'drop-shadow(0 0 2px rgba(255,255,255,0.2))';
-    }
+    // Marks stay at full brightness (1.0) until the owner has 3 marks, and the other 2 stay at full strength
+    opacity = 1.0;
+    scale = 1.0;
+    glowFilter = `drop-shadow(0 0 10px ${config.hex}) drop-shadow(0 0 16px ${config.glow})`;
   }
 
-  const pulseClass = isOldestOfThree && !isWinning ? 'animate-vanish-warning' : '';
-  const flickerClass = ageIndex === 0 && !isOldestOfThree && !isWinning ? 'animate-flicker' : '';
+  const pulseClass = isOldestOfThree && !isWinning ? 'animate-pulse' : '';
 
   return (
     <motion.div
@@ -86,9 +72,9 @@ export const MarkIcon: React.FC<MarkIconProps> = ({
         stiffness: 450,
         damping: 24,
       }}
-      className={`relative flex items-center justify-center select-none ${sizeMap[size]} ${pulseClass} ${flickerClass}`}
+      className={`relative flex items-center justify-center select-none ${sizeMap[size]} ${pulseClass}`}
       style={{
-        filter: isWinning ? 'drop-shadow(0 0 16px #ffd700)' : undefined,
+        filter: isWinning ? `drop-shadow(0 0 16px ${config.glow})` : undefined,
       }}
     >
       {player === 'X' && (

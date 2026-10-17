@@ -1,8 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Bot, Users, Volume2, VolumeX, RotateCcw, Share2, Check } from 'lucide-react';
+import React from 'react';
+import { Bot, Users, Volume2, VolumeX, RotateCcw, Share2 } from 'lucide-react';
 import { GameState } from '@/lib/game';
 
 import { useRouter } from 'next/navigation';
@@ -33,53 +32,29 @@ export const TopControls: React.FC<TopControlsProps> = ({
   score,
   streak,
 }) => {
-  const [copied, setCopied] = useState(false);
   const router = useRouter();
 
   const handleInvite = async () => {
     if (typeof window === 'undefined') return;
     const code = generateRoomCode();
-    const roomUrl = `${window.location.origin}/room/${code}`;
-
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: 'Vanish XO Online',
-          text: `Join my Vanish XO game! Room: ${code}`,
-          url: roomUrl,
-        });
-        router.push(`/room/${code}`);
-        return;
-      } catch {
-        // Fallback to clipboard
-      }
-    }
-
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(roomUrl).catch(() => {});
-    }
-    setCopied(true);
-    setTimeout(() => {
-      setCopied(false);
-      router.push(`/room/${code}`);
-    }, 600);
+    router.push(`/room/${code}?action=create`);
   };
 
   const isXTurn = state.turn === 'X' && state.winner === null;
   const isOTurn = state.turn === 'O' && state.winner === null;
 
   return (
-    <div className="w-full max-w-[360px] mx-auto flex flex-col gap-3 px-2 select-none">
+    <div className="w-full max-w-[360px] mx-auto flex flex-col gap-2 px-1 select-none">
       {/* Top Utility Bar */}
       <div className="flex items-center justify-between">
         {/* Mode Toggle Icons */}
-        <div className="flex items-center gap-1 bg-slate-900/80 p-1 rounded-xl border border-white/10 backdrop-blur-md">
+        <div className="flex items-center gap-1 bg-slate-900/80 p-0.5 rounded-xl border border-white/10 backdrop-blur-md">
           <button
             type="button"
             id="mode-bot"
             aria-label="Play vs Bot"
             onClick={() => onModeChange('bot')}
-            className={`p-2 rounded-lg transition-all duration-200 cursor-pointer ${
+            className={`min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg transition-all duration-200 cursor-pointer ${
               mode === 'bot'
                 ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/40 shadow-[0_0_10px_rgba(0,240,255,0.3)]'
                 : 'text-slate-400 hover:text-slate-200'
@@ -92,7 +67,7 @@ export const TopControls: React.FC<TopControlsProps> = ({
             id="mode-pvp"
             aria-label="Pass and Play"
             onClick={() => onModeChange('pvp')}
-            className={`p-2 rounded-lg transition-all duration-200 cursor-pointer ${
+            className={`min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg transition-all duration-200 cursor-pointer ${
               mode === 'pvp'
                 ? 'bg-pink-500/20 text-pink-400 border border-pink-500/40 shadow-[0_0_10px_rgba(255,0,127,0.3)]'
                 : 'text-slate-400 hover:text-slate-200'
@@ -104,14 +79,14 @@ export const TopControls: React.FC<TopControlsProps> = ({
 
         {/* Bot Difficulty Selector (Only visible in Bot mode) */}
         {mode === 'bot' && (
-          <div className="flex items-center gap-1 bg-slate-900/80 p-1 rounded-xl border border-white/10 text-[11px] font-bold">
+          <div className="flex items-center gap-1 bg-slate-900/80 p-0.5 rounded-xl border border-white/10 text-[11px] font-bold">
             {(['easy', 'medium', 'hard'] as const).map((diff) => (
               <button
                 key={diff}
                 type="button"
                 id={`diff-${diff}`}
                 onClick={() => onDifficultyChange(diff)}
-                className={`px-2 py-1 rounded-lg uppercase transition-all duration-200 cursor-pointer ${
+                className={`min-h-[44px] px-2.5 rounded-lg uppercase flex items-center justify-center transition-all duration-200 cursor-pointer ${
                   botDifficulty === diff
                     ? 'bg-cyan-400 text-black font-extrabold shadow-[0_0_8px_rgba(0,240,255,0.4)]'
                     : 'text-slate-400 hover:text-slate-200'
@@ -131,7 +106,7 @@ export const TopControls: React.FC<TopControlsProps> = ({
             id="toggle-sound"
             aria-label="Toggle Sound"
             onClick={onToggleSound}
-            className={`p-2 rounded-xl border transition-all duration-200 cursor-pointer ${
+            className={`min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl border transition-all duration-200 cursor-pointer ${
               soundEnabled
                 ? 'bg-slate-800 text-cyan-300 border-cyan-500/40 shadow-[0_0_8px_rgba(0,240,255,0.3)]'
                 : 'bg-slate-900/80 text-slate-500 border-white/5 hover:text-slate-300'
@@ -147,22 +122,10 @@ export const TopControls: React.FC<TopControlsProps> = ({
               id="invite-friend"
               aria-label="Invite a Friend"
               onClick={handleInvite}
-              className="p-2 rounded-xl bg-slate-900/80 text-cyan-400 hover:text-cyan-300 border border-cyan-500/20 hover:border-cyan-500/40 transition-all duration-200 cursor-pointer active:scale-95"
+              className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl bg-slate-900/80 text-cyan-400 hover:text-cyan-300 border border-cyan-500/20 hover:border-cyan-500/40 transition-all duration-200 cursor-pointer active:scale-95"
             >
-              {copied ? <Check size={18} className="text-emerald-400" /> : <Share2 size={18} />}
+              <Share2 size={18} />
             </button>
-            <AnimatePresence>
-              {copied && (
-                <motion.span
-                  initial={{ opacity: 0, y: 5 }}
-                  animate={{ opacity: 1, y: -2 }}
-                  exit={{ opacity: 0 }}
-                  className="absolute -top-7 right-0 text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500 text-black shadow-md tracking-wider uppercase pointer-events-none"
-                >
-                  COPIED
-                </motion.span>
-              )}
-            </AnimatePresence>
           </div>
 
           {/* Restart Round */}
@@ -171,25 +134,25 @@ export const TopControls: React.FC<TopControlsProps> = ({
             id="restart-round"
             aria-label="Restart Round"
             onClick={onRestart}
-            className="p-2 rounded-xl bg-slate-900/80 text-slate-400 hover:text-slate-200 hover:rotate-180 border border-white/5 transition-all duration-300 cursor-pointer active:scale-95"
+            className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl bg-slate-900/80 text-slate-400 hover:text-slate-200 hover:rotate-180 border border-white/5 transition-all duration-300 cursor-pointer active:scale-95"
           >
             <RotateCcw size={18} />
           </button>
         </div>
       </div>
 
-      {/* Visual Turn & Player Indicator Cards (No Turn Sentences) */}
-      <div className="grid grid-cols-2 gap-3 items-center">
+      {/* Visual Turn & Player Indicator Cards */}
+      <div className="grid grid-cols-2 gap-2 items-center">
         {/* Player X Card (Cyan) */}
         <div
-          className={`flex items-center justify-between p-2.5 rounded-2xl transition-all duration-300 border ${
+          className={`flex items-center justify-between h-11 px-2.5 rounded-xl transition-all duration-300 border ${
             isXTurn
-              ? 'bg-cyan-950/40 border-cyan-400/80 shadow-[0_0_20px_rgba(0,240,255,0.3)] scale-[1.02]'
+              ? 'bg-cyan-950/40 border-cyan-400/80 shadow-[0_0_16px_rgba(0,240,255,0.3)] scale-[1.01]'
               : 'bg-slate-900/40 border-white/5 opacity-70'
           }`}
         >
           <div className="flex items-center gap-2">
-            <span className="w-8 h-8 rounded-xl bg-cyan-500/20 border border-cyan-400/50 flex items-center justify-center font-black text-cyan-300 text-base shadow-[0_0_8px_rgba(0,240,255,0.4)]">
+            <span className="w-7 h-7 rounded-lg bg-cyan-500/20 border border-cyan-400/50 flex items-center justify-center font-black text-cyan-300 text-sm shadow-[0_0_8px_rgba(0,240,255,0.4)]">
               X
             </span>
             <span className="font-mono text-xs font-semibold text-cyan-200">
@@ -201,7 +164,6 @@ export const TopControls: React.FC<TopControlsProps> = ({
           <div className="flex items-center gap-1">
             {[0, 1, 2].map((idx) => {
               const active = idx < state.movesX.length;
-              // If 3 marks, the oldest (idx 0) is ready to vanish
               const isOldestOfThree = state.movesX.length === 3 && idx === 0;
 
               return (
@@ -222,22 +184,22 @@ export const TopControls: React.FC<TopControlsProps> = ({
 
         {/* Player O / Bot Card (Pink) */}
         <div
-          className={`flex items-center justify-between p-2.5 rounded-2xl transition-all duration-300 border ${
+          className={`flex items-center justify-between h-11 px-2.5 rounded-xl transition-all duration-300 border ${
             isOTurn
-              ? 'bg-pink-950/40 border-pink-500/80 shadow-[0_0_20px_rgba(255,0,127,0.3)] scale-[1.02]'
+              ? 'bg-pink-950/40 border-pink-500/80 shadow-[0_0_16px_rgba(255,0,127,0.3)] scale-[1.01]'
               : 'bg-slate-900/40 border-white/5 opacity-70'
           }`}
         >
           <div className="flex items-center gap-2">
-            <span className="w-8 h-8 rounded-xl bg-pink-500/20 border border-pink-400/50 flex items-center justify-center font-black text-pink-300 text-base shadow-[0_0_8px_rgba(255,0,127,0.4)]">
-              {mode === 'bot' ? <Bot size={16} /> : 'O'}
+            <span className="w-7 h-7 rounded-lg bg-pink-500/20 border border-pink-400/50 flex items-center justify-center font-black text-pink-300 text-sm shadow-[0_0_8px_rgba(255,0,127,0.4)]">
+              {mode === 'bot' ? <Bot size={15} /> : 'O'}
             </span>
             <span className="font-mono text-xs font-semibold text-pink-200">
               {score.O}
             </span>
           </div>
 
-          {/* Mark Age Dots (Shows active marks out of 3) */}
+          {/* Mark Age Dots */}
           <div className="flex items-center gap-1">
             {[0, 1, 2].map((idx) => {
               const active = idx < state.movesO.length;

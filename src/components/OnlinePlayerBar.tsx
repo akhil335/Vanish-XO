@@ -1,29 +1,36 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Bot, User, Crown, Check } from 'lucide-react';
+import { Bot, User, Crown, Check, Circle, Share2, Plus, X } from 'lucide-react';
 import { RoomState, PlayerSeat, SEAT_COLORS } from '@/lib/types';
 
 interface OnlinePlayerBarProps {
   roomState: RoomState;
   mySeatIndex: number | null; // which seat belongs to local player, or null if spectator
   isHost: boolean;
+  highlightUnready?: boolean;
+  blockReasons?: string[];
   onToggleBot?: (seatIndex: number, currentIsBot: boolean) => void;
   onToggleReady?: (ready: boolean) => void;
+  onShare?: () => void;
 }
 
 export const OnlinePlayerBar: React.FC<OnlinePlayerBarProps> = ({
   roomState,
   mySeatIndex,
   isHost,
+  highlightUnready = false,
+  blockReasons = [],
   onToggleBot,
-  onToggleReady,
+  onShare,
 }) => {
   const [now, setNow] = useState<number>(0);
 
+  const phase = roomState.phase ?? roomState.status;
+
   // High-frequency tick for smooth countdown bar animation
   useEffect(() => {
-    if (roomState.status !== 'playing') return;
+    if ((roomState.phase ?? roomState.status) !== 'playing') return;
     const update = () => setNow(Date.now());
     const timer = setTimeout(update, 0);
     const interval = setInterval(update, 100);
@@ -31,9 +38,9 @@ export const OnlinePlayerBar: React.FC<OnlinePlayerBarProps> = ({
       clearTimeout(timer);
       clearInterval(interval);
     };
-  }, [roomState.status, roomState.turnStartedAt]);
+  }, [roomState.phase, roomState.status, roomState.turnStartedAt]);
 
-  const { seats, seatsCount, turnSeatIndex, turnStartedAt, turnDurationMs, status, playerMoves } = roomState;
+  const { seats, seatsCount, turnSeatIndex, turnStartedAt, turnDurationMs, playerMoves } = roomState;
 
   // Layout grid based on seatsCount: 2 seats = 2 cols; 3 seats = 3 cols; 4 seats = 4 cols (or 2x2)
   const gridColsClass =
@@ -47,12 +54,19 @@ export const OnlinePlayerBar: React.FC<OnlinePlayerBarProps> = ({
     <div className={`w-full grid ${gridColsClass} gap-2 select-none`}>
       {seats.map((seat: PlayerSeat) => {
         const isMySeat = mySeatIndex === seat.seatIndex;
-        const isTurn = status === 'playing' && turnSeatIndex === seat.seatIndex;
+        const isTurn = phase === 'playing' && turnSeatIndex === seat.seatIndex;
         const config = SEAT_COLORS[seat.symbol] || SEAT_COLORS.X;
+        const isSeatHost = roomState.hostPlayerId === seat.playerId && !seat.isBot && seat.playerId !== null;
+
+        // Categorize state
+        const isBot = Boolean(seat.isBot || seat.kind === 'bot');
+        const isEmpty = (!seat.playerId || seat.kind === 'empty') && !isBot;
+        const isOffline = Boolean(seat.playerId && (seat.connected === false || seat.isConnected === false));
+        const isReady = Boolean((seat.playerId && !isOffline && (seat.ready || seat.isReady)) || isBot);
 
         // Turn timer countdown calculation (20s)
         let timerPercent = 100;
-        if (isTurn && status === 'playing') {
+        if (isTurn && phase === 'playing') {
           const elapsed = Math.max(0, now - turnStartedAt);
           const remaining = Math.max(0, turnDurationMs - elapsed);
           timerPercent = Math.min(100, (remaining / turnDurationMs) * 100);
@@ -60,6 +74,161 @@ export const OnlinePlayerBar: React.FC<OnlinePlayerBarProps> = ({
 
         const moves = playerMoves[seat.symbol] || [];
 
+        // 1. Waiting Lobby States
+        if (phase === 'waiting') {
+          const isEmptyBlocking = highlightUnready && (blockReasons.includes('SEATS_NOT_FILLED') || blockReasons.includes('UNFILLED_SEATS') || blockReasons.length === 0);
+          const isSeatBlocking = highlightUnready && !isReady && (blockReasons.includes('NOT_ALL_READY') || blockReasons.length === 0);
+
+          // EMPTY State: dashed outline, pulsing share icon, host +bot button
+          if (isEmpty) {
+            return (
+              <div
+                key={seat.seatIndex}
+                onClick={() => onShare && onShare()}
+                className={`relative flex flex-col justify-between p-2.5 rounded-2xl border-2 border-dashed transition-all duration-300 min-h-[90px] cursor-pointer group select-none ${
+                  isEmptyBlocking
+                    ? 'border-amber-400 bg-amber-500/10 shadow-[0_0_15px_rgba(251,191,36,0.4)] animate-pulse'
+                    : 'border-cyan-500/30 bg-slate-950/40 hover:border-cyan-400/60 hover:bg-slate-900/60'
+                }`}
+              >
+                {/* Top Row: Symbol + Host Add Bot button */}
+                <div className="flex items-center justify-between">
+                  <span
+                    className="w-6 h-6 rounded-lg flex items-center justify-center font-black text-xs border opacity-40"
+                    style={{
+                      color: config.hex,
+                      borderColor: `${config.hex}44`,
+                      backgroundColor: `${config.hex}10`,
+                    }}
+                  >
+                    {seat.symbol}
+                  </span>
+
+                  {isHost && onToggleBot && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onToggleBot(seat.seatIndex, false);
+                      }}
+                      className="p-1 rounded-lg bg-purple-950/80 text-purple-300 border border-purple-500/40 hover:border-purple-300 hover:bg-purple-900 transition-all flex items-center gap-0.5 text-[10px] font-bold cursor-pointer"
+                      title="Add Bot"
+                    >
+                      <Bot size={12} />
+                      <Plus size={10} strokeWidth={3} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Center: Pulsing share icon */}
+                <div className="flex flex-col items-center justify-center my-auto py-1">
+                  <Share2
+                    size={16}
+                    className="text-cyan-400/80 group-hover:text-cyan-300 animate-pulse transition-all"
+                  />
+                </div>
+              </div>
+            );
+          }
+
+          // Occupied in waiting mode (BOT, READY, JOINED NOT READY, OFFLINE)
+          return (
+            <div
+              key={seat.seatIndex}
+              className={`relative flex flex-col justify-between p-2 rounded-xl border transition-all duration-300 min-h-[72px] sm:min-h-[80px] select-none ${
+                isOffline
+                  ? 'bg-slate-900/40 border-red-500/30 opacity-70'
+                  : isBot
+                  ? 'bg-purple-950/25 border-purple-500/40 shadow-[0_0_12px_rgba(176,38,255,0.15)]'
+                  : isReady
+                  ? 'bg-slate-900/90 border-emerald-500/60 shadow-[0_0_15px_rgba(52,211,153,0.25)]'
+                  : isSeatBlocking
+                  ? 'bg-slate-900/60 border-amber-400 shadow-[0_0_15px_rgba(251,191,36,0.5)] animate-pulse'
+                  : 'bg-slate-900/40 border-white/10 opacity-75'
+              }`}
+            >
+              {/* Top Row: Symbol, Identity & Crown, Connection Dot */}
+              <div className="flex items-center justify-between gap-1">
+                <div className="flex items-center gap-1.5">
+                  <span
+                    className="w-6 h-6 rounded-lg flex items-center justify-center font-black text-xs border shadow-sm"
+                    style={{
+                      color: config.hex,
+                      borderColor: `${config.hex}55`,
+                      backgroundColor: `${config.hex}18`,
+                    }}
+                  >
+                    {seat.symbol}
+                  </span>
+
+                  <div className="flex items-center text-slate-300">
+                    {isBot ? (
+                      <Bot size={14} className="text-purple-400" />
+                    ) : (
+                      <User size={14} className={isMySeat ? 'text-cyan-300' : 'text-slate-400'} />
+                    )}
+                    {isSeatHost && (
+                      <Crown size={11} className="text-amber-400 fill-amber-400 ml-0.5" />
+                    )}
+                  </div>
+                </div>
+
+                {/* Connection Status Dot */}
+                <div className="flex items-center gap-1">
+                  {isOffline ? (
+                    <span className="w-2.5 h-2.5 rounded-full border-2 border-red-500 animate-ping opacity-85" />
+                  ) : isBot ? (
+                    <span className="w-2 h-2 rounded-full bg-emerald-400/80 shadow-[0_0_4px_#34d399]" />
+                  ) : (
+                    <span
+                      className="w-2 h-2 rounded-full"
+                      style={{
+                        backgroundColor: config.hex,
+                        boxShadow: `0 0 6px ${config.hex}`,
+                      }}
+                    />
+                  )}
+                </div>
+              </div>
+
+              {/* Bottom Row in Waiting Lobby: Readiness Badge / Host Bot Removal */}
+              <div className="flex items-center justify-between mt-2 pt-1.5 border-t border-white/[0.06]">
+                <div className="flex items-center gap-1">
+                  {isBot ? (
+                    <div className="flex items-center gap-1 text-[10px] font-bold text-purple-300">
+                      <Check size={12} className="text-emerald-400 stroke-[3]" />
+                      <span>BOT</span>
+                    </div>
+                  ) : isReady ? (
+                    <div className="flex items-center gap-1 text-[10px] font-bold text-emerald-400">
+                      <Check size={12} className="stroke-[3]" />
+                      <span>READY</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1 text-[10px] font-bold text-slate-500">
+                      <Circle size={12} strokeWidth={2.5} />
+                      <span>WAIT</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Host button to remove bot */}
+                {isHost && isBot && onToggleBot && (
+                  <button
+                    type="button"
+                    onClick={() => onToggleBot(seat.seatIndex, true)}
+                    className="p-0.5 rounded text-slate-500 hover:text-rose-400 transition-all cursor-pointer"
+                    title="Remove Bot"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        }
+
+        // 2. Playing / Finished States
         return (
           <div
             key={seat.seatIndex}
@@ -106,12 +275,12 @@ export const OnlinePlayerBar: React.FC<OnlinePlayerBarProps> = ({
                 {/* Identity: Bot or Human */}
                 <div className="flex items-center text-slate-300">
                   {seat.isBot ? (
-                    <Bot size={14} className="text-slate-400" />
+                    <Bot size={15} className="text-purple-400 animate-pulse" />
                   ) : (
                     <User size={14} className={isMySeat ? 'text-cyan-300' : 'text-slate-400'} />
                   )}
-                  {seat.seatIndex === 0 && (
-                    <Crown size={11} className="text-amber-400 ml-0.5" />
+                  {isSeatHost && (
+                    <Crown size={11} className="text-amber-400 fill-amber-400 ml-0.5" />
                   )}
                 </div>
               </div>
@@ -134,7 +303,7 @@ export const OnlinePlayerBar: React.FC<OnlinePlayerBarProps> = ({
               </div>
             </div>
 
-            {/* Bottom Row: Marks queue & Ready / Bot toggle button */}
+            {/* Bottom Row: Marks queue */}
             <div className="flex items-center justify-between mt-2 pt-1 border-t border-white/[0.04]">
               {/* Mark Age Dots (up to 3 marks) */}
               <div className="flex items-center gap-1">
@@ -160,59 +329,6 @@ export const OnlinePlayerBar: React.FC<OnlinePlayerBarProps> = ({
                   );
                 })}
               </div>
-
-              {/* Lobby Waiting Controls */}
-              {status === 'waiting' && (
-                <div className="flex items-center gap-1">
-                  {/* Host can toggle Bot on empty seats */}
-                  {isHost && seat.seatIndex !== 0 && !seat.playerId && onToggleBot && (
-                    <button
-                      type="button"
-                      onClick={() => onToggleBot(seat.seatIndex, seat.isBot)}
-                      className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded transition-all cursor-pointer ${
-                        seat.isBot
-                          ? 'bg-purple-950/80 text-purple-300 border border-purple-500/40'
-                          : 'bg-slate-800 text-slate-400 border border-white/10 hover:text-slate-200'
-                      }`}
-                    >
-                      {seat.isBot ? 'BOT' : '+BOT'}
-                    </button>
-                  )}
-
-                  {/* Ready Indicator or Ready Toggle Button */}
-                  {isMySeat ? (
-                    <button
-                      type="button"
-                      onClick={() => onToggleReady && onToggleReady(!seat.isReady)}
-                      className={`text-[9px] font-extrabold px-2 py-0.5 rounded cursor-pointer transition-all ${
-                        seat.isReady
-                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/50'
-                          : 'bg-amber-500/20 text-amber-300 border border-amber-400/50 animate-pulse'
-                      }`}
-                    >
-                      {seat.isReady ? 'READY' : 'GO'}
-                    </button>
-                  ) : (
-                    <span
-                      className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
-                        seat.isReady || seat.isBot
-                          ? 'text-emerald-400'
-                          : seat.playerId
-                          ? 'text-amber-400 animate-pulse'
-                          : 'text-slate-600'
-                      }`}
-                    >
-                      {seat.isReady || seat.isBot ? (
-                        <Check size={10} className="inline text-emerald-400" />
-                      ) : seat.playerId ? (
-                        '...'
-                      ) : (
-                        'OPEN'
-                      )}
-                    </span>
-                  )}
-                </div>
-              )}
             </div>
           </div>
         );

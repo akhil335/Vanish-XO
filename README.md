@@ -2,7 +2,7 @@
 
 A mobile-first tactical web game: **Tic-tac-toe where each player can only have 3 marks on the board**. Placing a 4th mark causes that player's **oldest mark to vanish**. There are no draws!
 
-Built with **Next.js (App Router)** + **TypeScript** + **Tailwind CSS** + **Framer Motion** + **PartyKit** authoritative real-time multiplayer.  
+Built with **Next.js (App Router)** + **TypeScript** + **Tailwind CSS** + **Framer Motion** + **PartyServer** authoritative real-time multiplayer on Cloudflare Workers.  
 Dark neon aesthetic featuring electric cyan X, hot pink O, neon yellow ▲, and neon purple ■.
 
 ---
@@ -35,8 +35,8 @@ The UI requires no reading to learn and play:
 
 ## 🎮 Modes
 
-- **Online Multiplayer (PartyKit)**:
-  - Authoritative PartyKit server in `/party/server.ts` enforcing pure logic from `/lib/game`.
+- **Online Multiplayer (PartyServer on Cloudflare Workers)**:
+  - Authoritative realtime server in `/realtime/server.ts` enforcing pure logic from `/lib/game`.
   - 4-character room codes (`/room/CODE`) without ambiguous characters (`no 0, O, 1, I`).
   - Host configures 2, 3, or 4 seats; empty seats can be filled with server-run bots or joined by friends.
   - Instant join with no signups or menus; shapes & colors assigned by seat.
@@ -56,9 +56,9 @@ The UI requires no reading to learn and play:
 ## 🛠️ Architecture & Tech Stack
 
 - **Frontend**: Next.js 16 (App Router), React 19, Tailwind CSS 4, Framer Motion, canvas-confetti, Lucide icons.
-- **Multiplayer Server**: PartyKit WebSocket server (`/party/server.ts`, `/party/room.ts`) with Zod schema validation.
+- **Multiplayer Server**: PartyServer WebSocket Durable Objects on Cloudflare Workers (`/realtime/server.ts`, `/realtime/room.ts`, `/realtime/lobby.ts`) with Zod schema validation.
 - **Shared Pure Game Logic**: Isolated in `/lib/game.ts` (`placeMark`, `placeRoomMark`, `getWinner`, `getNextVanish`, `getRoomBotMove`). Shared by client and server with zero browser or React dependencies.
-- **Testing**: Vitest (`pnpm test`) covering game logic, room handlers, timeouts, and live PartyKit integration.
+- **Testing**: Vitest (`pnpm test`) covering game logic, room handlers, timeouts, and live class integration.
 
 ---
 
@@ -71,11 +71,11 @@ The UI requires no reading to learn and play:
 pnpm install
 ```
 
-### 2. Run the PartyKit Server (in one terminal)
+### 2. Run the Realtime Server (in one terminal)
 ```bash
-pnpm party:dev
+pnpm realtime:dev
 ```
-The PartyKit server runs on `http://127.0.0.1:1999`.
+The realtime server runs on `http://localhost:8787` (via Wrangler).
 
 ### 3. Run the Next.js Frontend (in a second terminal)
 ```bash
@@ -102,29 +102,48 @@ pnpm build
 
 ## 🌐 Environment Variables
 
-| Variable | Description | Default (Local) |
-| :--- | :--- | :--- |
-| `NEXT_PUBLIC_PARTYKIT_HOST` | Hostname of the PartyKit server (without protocol) | `localhost:1999` |
+See `.env.example` for the environment template.
 
-Create a `.env.local` file for production deployment:
-```env
-NEXT_PUBLIC_PARTYKIT_HOST=vanish-xo.<your-partykit-subdomain>.partykit.dev
-```
+| Variable | Description | Default (Local) | Example (Production) |
+| :--- | :--- | :--- | :--- |
+| `NEXT_PUBLIC_REALTIME_HOST` | Bare hostname of realtime server (no protocol, port, or trailing slash) | `localhost:8787` (development only) | `vanish-xo.<your-subdomain>.workers.dev` |
+| `NEXT_PUBLIC_SITE_URL` | Canonical URL of the web frontend (used for Open Graph, invite links, sitemap) | `http://localhost:3000` | `https://vanish-xo.vercel.app` |
 
 ---
 
-## 🚢 Deployment
+## 🚢 Deploy
 
-### 1. Deploy the PartyKit Server
-Deploy the authoritative game server to PartyKit's edge platform:
-```bash
-pnpm party:deploy
-```
-This provisions your server at `vanish-xo.<your-partykit-subdomain>.partykit.dev`.
+Follow these steps to deploy Vanish XO to production:
 
-### 2. Deploy the Next.js Frontend to Vercel
-1. Push your repository to GitHub.
-2. Import the project into [Vercel](https://vercel.com).
-3. In Vercel Project Settings &gt; **Environment Variables**, add:
-   - `NEXT_PUBLIC_PARTYKIT_HOST`: `vanish-xo.<your-partykit-subdomain>.partykit.dev`
-4. Click **Deploy**.
+1. **Cloudflare Account & Login**:
+   Create a free [Cloudflare](https://dash.cloudflare.com/sign-up) account, then authenticate Wrangler:
+   ```bash
+   pnpm wrangler login
+   ```
+
+2. **Deploy the Realtime Server**:
+   Deploy the Cloudflare Worker with SQLite-backed Durable Objects:
+   ```bash
+   pnpm realtime:deploy
+   ```
+   Copy the printed `workers.dev` host from the output (e.g., `vanish-xo.<your-subdomain>.workers.dev`).
+
+3. **Set Environment Variables in Vercel**:
+   Import your repository into [Vercel](https://vercel.com) and set the environment variables in **Project Settings > Environment Variables**:
+   - `NEXT_PUBLIC_REALTIME_HOST`: Your bare host only (e.g., `vanish-xo.<your-subdomain>.workers.dev`), omitting `https://`, ports, or trailing slashes.
+   - `NEXT_PUBLIC_SITE_URL`: Your web domain with protocol (e.g., `https://vanish-xo.vercel.app`).
+
+4. **Redeploy Vercel**:
+   Next.js bakes `NEXT_PUBLIC_*` variables into the static bundle at **build time**. If setting or modifying these variables, trigger a redeploy in Vercel (via **Deployments > ... > Redeploy**) so the build bakes in the new values.
+
+5. **Enable Analytics in Vercel Dashboard**:
+   Navigate to the **Analytics** tab in your Vercel project dashboard and click **Enable**. The app tracks gameplay actions anonymously with zero personal data.
+
+6. **Troubleshooting**:
+   - **Wrong Host Format**: Ensure `NEXT_PUBLIC_REALTIME_HOST` is a bare hostname without `https://`, `wss://`, port numbers, or trailing slashes.
+   - **Missing Redeploy**: If client rooms show "server busy" or fail to reach the worker, ensure Vercel was redeployed after environment variables were saved.
+   - **WS vs WSS Protocol**: `ws://` is strictly restricted to `localhost:8787` in development. In production, `wss://` is automatically enforced on remote hosts.
+   - **Live Worker Logs**: Inspect real-time logs and verify room lifecycle and alarm triggers by running:
+     ```bash
+     pnpm wrangler tail
+     ```

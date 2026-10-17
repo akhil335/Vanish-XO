@@ -136,6 +136,40 @@ class SoundManager {
       // Safe catch
     }
   }
+
+  /**
+   * Sound effect for a loss (descending neon tone)
+   */
+  public playLose() {
+    if (!this.enabled) return;
+    this.initCtx();
+    if (!this.ctx) return;
+
+    try {
+      const now = this.ctx.currentTime;
+      const notes = [440, 370, 311.13, 233.08]; // A4, F#4, Eb4, Bb3
+
+      notes.forEach((freq, idx) => {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, now + idx * 0.12);
+
+        gain.gain.setValueAtTime(0.2, now + idx * 0.12);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.12 + 0.28);
+
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+
+        osc.start(now + idx * 0.12);
+        osc.stop(now + idx * 0.12 + 0.28);
+      });
+    } catch {
+      // Safe catch
+    }
+  }
 }
 
 export const soundManager = new SoundManager();
@@ -143,7 +177,7 @@ export const soundManager = new SoundManager();
 /**
  * Mobile vibration helper with safe feature detection
  */
-export function triggerHaptic(type: 'vanish' | 'win') {
+export function triggerHaptic(type: 'vanish' | 'win' | 'lose') {
   if (typeof window === 'undefined' || typeof navigator === 'undefined') return;
   if (!('vibrate' in navigator)) return;
 
@@ -152,6 +186,8 @@ export function triggerHaptic(type: 'vanish' | 'win') {
       navigator.vibrate(40);
     } else if (type === 'win') {
       navigator.vibrate([80, 50, 140]);
+    } else if (type === 'lose') {
+      navigator.vibrate([120, 60, 200]);
     }
   } catch {
     // Vibration blocked or not supported on device

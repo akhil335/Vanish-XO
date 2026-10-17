@@ -12,13 +12,4 @@ export function getOrCreatePlayerId(): string {
   }
 }
 
-export function getPartyKitHost(): string {
-  if (process.env.NEXT_PUBLIC_PARTYKIT_HOST) {
-    return process.env.NEXT_PUBLIC_PARTYKIT_HOST;
-  }
-  if (typeof window !== 'undefined') {
-    // If running on local development
-    return `${window.location.hostname}:1999`;
-  }
-  return 'localhost:1999';
-}
+export { getRealtimeHost } from './config';

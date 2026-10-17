@@ -1,6 +1,0 @@
-{
-  "$schema": "https://www.partykit.io/schema.json",
-  "name": "vanish-xo",
-  "main": "party/server.ts",
-  "compatibilityDate": "2024-07-18"
-}

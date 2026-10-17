@@ -23,10 +23,14 @@ export interface PlayerSeat {
   seatIndex: number;
   symbol: MarkSymbol;
   playerId: string | null;
+  kind?: 'human' | 'bot' | 'empty';
   isBot: boolean;
   isReady: boolean;
   isConnected: boolean;
+  ready?: boolean;
+  connected?: boolean;
   disconnectedAt: number | null;
+  joinedAt?: number | null;
 }
 
 export interface VanishedEvent {
@@ -34,10 +38,22 @@ export interface VanishedEvent {
   cell: number;
 }
 
+export interface MoveRecord {
+  player: MarkSymbol;
+  cell: number;
+  vanished: VanishedEvent | null;
+}
+
 export interface RoomState {
   roomCode: string;
-  status: 'waiting' | 'playing' | 'finished';
+  status: 'uninitialized' | 'waiting' | 'playing' | 'finished';
+  phase?: 'uninitialized' | 'waiting' | 'playing' | 'finished';
   seatsCount: 2 | 3 | 4;
+  seatCount?: 2 | 3 | 4;
+  readyCount?: number;
+  requiredCount?: number;
+  canStart?: boolean;
+  blockReasons?: string[];
   config: GameConfig;
   seats: PlayerSeat[];
   hostPlayerId: string | null;
@@ -51,13 +67,34 @@ export interface RoomState {
   winningLine: [number, number, number] | null;
   lastVanished: VanishedEvent | null;
   spectatorCount: number;
+  matchToken?: string;
+  history?: MoveRecord[];
+  lastMoveCell?: number | null;
 }
 
-// Client to Server Intents
+// Matchmaking config passed when joining a matchmade room
+export const MatchConfigSchema = z.object({
+  seatsCount: z.union([z.literal(2), z.literal(3), z.literal(4)]),
+  assignedSeatIndex: z.number().int().min(0).max(3),
+  startingSeatIndex: z.number().int().min(0).max(3),
+  botSeats: z.array(z.number().int().min(0).max(3)),
+});
+export type MatchConfig = z.infer<typeof MatchConfigSchema>;
+
+// Client to Server Intents for Game Rooms
 export const ClientMessageSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('create'),
+    playerId: z.string().min(1).max(64),
+    seatsCount: z.union([z.literal(2), z.literal(3), z.literal(4)]).optional(),
+    matchToken: z.string().optional(),
+    matchConfig: MatchConfigSchema.optional(),
+  }),
   z.object({
     type: z.literal('join'),
     playerId: z.string().min(1).max(64),
+    matchConfig: MatchConfigSchema.optional(),
+    matchToken: z.string().optional(),
   }),
   z.object({
     type: z.literal('set_seats'),
@@ -85,33 +122,94 @@ export const ClientMessageSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('leave'),
   }),
+  z.object({
+    type: z.literal('ping'),
+  }),
 ]);
 
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
 
-// Server to Client Messages
+// Server to Client Messages for Game Rooms
 export type ServerMessage =
   | { type: 'state'; state: RoomState }
-  | { type: 'error'; code: string; message?: string }
+  | { type: 'error'; code: string; message?: string; blockReasons?: string[] }
   | { type: 'player_joined'; seatIndex: number; isBot: boolean }
-  | { type: 'player_left'; seatIndex: number };
+  | { type: 'player_left'; seatIndex: number }
+  | { type: 'host_changed'; newHostPlayerId: string; seatIndex: number };
 
-// 4-character room code generator without confusing characters (no 0, O, 1, I)
+// Matchmaking Lobby Messages (Client -> Server)
+export const LobbyClientMessageSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('queue_join'),
+    playerId: z.string().min(1).max(64),
+    targetCount: z.union([z.literal(2), z.literal(3), z.literal(4)]),
+  }),
+  z.object({
+    type: z.literal('queue_leave'),
+    playerId: z.string().min(1).max(64),
+  }),
+]);
+
+export type LobbyClientMessage = z.infer<typeof LobbyClientMessageSchema>;
+
+// Matchmaking Lobby Messages (Server -> Client)
+export type LobbyServerMessage =
+  | {
+      type: 'queue_status';
+      searchingCounts: Record<2 | 3 | 4, number>;
+      totalSearching: number;
+      myQueue?: {
+        targetCount: 2 | 3 | 4;
+        currentCount: number;
+        playersNeeded: number;
+      };
+    }
+  | {
+      type: 'match_found';
+      roomCode: string;
+      token?: string;
+      matchToken?: string;
+      seatIndex: number;
+      seatsCount: 2 | 3 | 4;
+      startingSeatIndex: number;
+      botSeats: number[];
+      countdownMs: number;
+    }
+  | {
+      type: 'server_busy';
+    }
+  | {
+      type: 'error';
+      code: string;
+      message?: string;
+    };
+
+// 5-character room code generator without confusing characters (no 0, O, 1, I)
+// 32 characters => 32^5 = 33,554,432 combinations (~33.5 million)
 export const ROOM_CODE_CHARS = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 
 export function generateRoomCode(): string {
+  const bytes = new Uint8Array(5);
+  crypto.getRandomValues(bytes);
   let result = '';
-  for (let i = 0; i < 4; i++) {
-    result += ROOM_CODE_CHARS.charAt(Math.floor(Math.random() * ROOM_CODE_CHARS.length));
+  for (let i = 0; i < 5; i++) {
+    result += ROOM_CODE_CHARS.charAt(bytes[i] % 32);
   }
   return result;
 }
 
 export function isValidRoomCode(code: string): boolean {
-  if (code.length !== 4) return false;
-  const upper = code.toUpperCase();
-  for (let i = 0; i < 4; i++) {
+  if (typeof code !== 'string') return false;
+  const upper = code.trim().toUpperCase();
+  if (upper.length !== 5) return false;
+  for (let i = 0; i < 5; i++) {
     if (!ROOM_CODE_CHARS.includes(upper[i])) return false;
   }
   return true;
+}
+
+export function generateMatchToken(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 }

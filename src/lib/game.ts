@@ -2,6 +2,7 @@ import {
   GameConfig,
   MarkSymbol,
   MARK_SYMBOLS,
+  MoveRecord,
   PlayerSeat,
   RoomState,
   VanishedEvent,
@@ -90,6 +91,8 @@ export interface GameState {
   winningLine: [number, number, number] | null;
   lastVanished: VanishedInfo | null;
   moveCount: number;
+  history: MoveRecord[];
+  lastMoveCell: number | null;
 }
 
 /**
@@ -126,6 +129,8 @@ export function createGame(configOrPlayers: GameConfig | number = 2): GameState 
     winningLine: null,
     lastVanished: null,
     moveCount: 0,
+    history: [],
+    lastMoveCell: null,
   };
 }
 
@@ -289,6 +294,13 @@ export function placeMark(
   const winner = winningLine ? currentPlayer : null;
   const nextTurn = winner ? currentPlayer : (currentPlayer === 'X' ? 'O' : 'X');
 
+  const moveRecord: MoveRecord = {
+    player: currentPlayer,
+    cell: cellIndex,
+    vanished: lastVanished ? { symbol: lastVanished.player, cell: lastVanished.cell } : null,
+  };
+  const newHistory = [...(state.history || []), moveRecord];
+
   const nextState: GameState = {
     config: state.config || getConfigForPlayers(2),
     board: newBoard,
@@ -299,6 +311,8 @@ export function placeMark(
     winningLine,
     lastVanished,
     moveCount: state.moveCount + 1,
+    history: newHistory,
+    lastMoveCell: cellIndex,
   };
 
   return { nextState, success: true };
@@ -356,8 +370,13 @@ export function getEasyBotMove(state: GameState): number {
 /**
  * Medium:
  * 1. Checks if bot ('O') can win immediately (taking vanishing into account).
- * 2. Checks if opponent ('X') could win on their next turn, and blocks that cell.
- * 3. Prefers center cell (4), then corners [0, 2, 6, 8], then edges.
+ * 2. One-move lookahead: filters out any move where the opponent has an immediate
+ *    winning reply on their next turn (avoids walking into vanish traps and missed blocks).
+ * 3. Blocks any current opponent threat.
+ * 4. Positional fallback: center (4), corners, then random.
+ *
+ * Difficulty behavior: Medium avoids immediate 1-move traps, but lacks multi-ply
+ * minimax depth, making it beatable by players who set up forks or 2+ move strategies.
  */
 export function getMediumBotMove(state: GameState): number {
   const available = getAvailableMoves(state);
@@ -374,14 +393,28 @@ export function getMediumBotMove(state: GameState): number {
     }
   }
 
-  // 2. Can opponent win on their next turn if we don't block?
+  // 2. Avoid walking into immediate defeat: filter for safe moves where opponent
+  // cannot immediately win on their next turn (including vanish trap positions).
+  const safeMoves = available.filter((move) => {
+    const { nextState, success } = placeMark(state, move);
+    if (!success) return false;
+    const oppMoves = getAvailableMoves(nextState);
+    return !oppMoves.some((oppMove) => {
+      const oppRes = placeMark(nextState, oppMove);
+      return oppRes.success && oppRes.nextState.winner === opponentPlayer;
+    });
+  });
+
+  const candidatePool = safeMoves.length > 0 ? safeMoves : available;
+
+  // 3. Can opponent win on their next turn if we don't block?
   // We simulate opponent playing as current turn
   const opponentSimState: GameState = {
     ...state,
     turn: opponentPlayer,
   };
   const winningBlocks: number[] = [];
-  for (const move of available) {
+  for (const move of candidatePool) {
     const { nextState, success } = placeMark(opponentSimState, move);
     if (success && nextState.winner === opponentPlayer) {
       winningBlocks.push(move);
@@ -391,17 +424,17 @@ export function getMediumBotMove(state: GameState): number {
     return winningBlocks[0];
   }
 
-  // 3. Strategic fallback: prefer center (4) if available
-  if (available.includes(4)) return 4;
+  // 4. Strategic fallback: prefer center (4) if available
+  if (candidatePool.includes(4)) return 4;
 
   // Prefer corners
-  const corners = [0, 2, 6, 8].filter((c) => available.includes(c));
+  const corners = [0, 2, 6, 8].filter((c) => candidatePool.includes(c));
   if (corners.length > 0) {
     return corners[Math.floor(Math.random() * corners.length)];
   }
 
-  // Otherwise random available
-  return available[Math.floor(Math.random() * available.length)];
+  // Otherwise random available from candidatePool
+  return candidatePool[Math.floor(Math.random() * candidatePool.length)];
 }
 
 /**
@@ -483,6 +516,9 @@ function evaluateHeuristic(state: GameState, maximizingPlayer: Player): number {
   const maxSet = new Set(maxMoves);
   const minSet = new Set(minMoves);
 
+  const minOldest = minMoves.length === 3 ? minMoves[0] : -1;
+  const maxOldest = maxMoves.length === 3 ? maxMoves[0] : -1;
+
   for (const [a, b, c] of WINNING_LINES) {
     const cells = [a, b, c];
     const maxCount = cells.filter((cell) => maxSet.has(cell)).length;
@@ -490,6 +526,15 @@ function evaluateHeuristic(state: GameState, maximizingPlayer: Player): number {
 
     if (maxCount === 2 && minCount === 0) score += 40;
     if (minCount === 2 && maxCount === 0) score -= 50;
+
+    // Vanish trap threat: maximizing player sets up 2-in-a-row targeting opponent's vanishing mark
+    if (minOldest !== -1 && cells.includes(minOldest) && maxCount === 2) {
+      score += 70;
+    }
+    // Vanish trap danger: minimizing player threatens line where 3rd cell is maximizing player's vanishing mark
+    if (maxOldest !== -1 && cells.includes(maxOldest) && minCount === 2) {
+      score -= 80;
+    }
   }
 
   return score;
@@ -651,6 +696,8 @@ export function createInitialRoomState(
     winningLine: null,
     lastVanished: null,
     spectatorCount: 0,
+    history: [],
+    lastMoveCell: null,
   };
 }
 
@@ -767,6 +814,13 @@ export function placeRoomMark(
     ? state.turnSeatIndex
     : (state.turnSeatIndex + 1) % state.seatsCount;
 
+  const moveRecord: MoveRecord = {
+    player: symbol,
+    cell: cellIndex,
+    vanished: lastVanished,
+  };
+  const newHistory = [...(state.history || []), moveRecord];
+
   const nextState: RoomState = {
     ...state,
     board: newBoard,
@@ -777,6 +831,8 @@ export function placeRoomMark(
     winningLine,
     lastVanished,
     status: nextStatus,
+    history: newHistory,
+    lastMoveCell: cellIndex,
   };
 
   return { nextState, success: true };
@@ -818,6 +874,8 @@ export function resetRoomForRematch(state: RoomState, timestamp: number = Date.n
     winner: null,
     winningLine: null,
     lastVanished: null,
+    history: [],
+    lastMoveCell: null,
   };
 }
 
@@ -871,5 +929,166 @@ export function getRoomBotMove(state: RoomState, seatIndex: number): number {
   }
 
   return available[Math.floor(Math.random() * available.length)];
+}
+
+/* =========================================================================
+   REPLAY & MOVE INSIGHTS (Pure functions for game-over analysis)
+   ========================================================================= */
+
+export interface MoveInsight {
+  stepIndex: number;
+  hasWarning: boolean;
+  isTrap: boolean;
+  reason?: 'opponent_win_available' | 'none';
+}
+
+/**
+ * Pure function to evaluate insights / traps for each move in game history.
+ * Flags moves where the opponent had an immediate winning reply available after the move.
+ */
+export function getMoveInsights(
+  history: MoveRecord[],
+  config: GameConfig = getConfigForPlayers(2)
+): MoveInsight[] {
+  if (!history || history.length === 0) return [];
+
+  const gridSize = config.gridSize;
+  const totalCells = config.totalCells;
+
+  const board: (MarkSymbol | null)[] = Array(totalCells).fill(null);
+  const playerMarks: Record<MarkSymbol, number[]> = {
+    X: [],
+    O: [],
+    '▲': [],
+    '■': [],
+  };
+
+  const insights: MoveInsight[] = [];
+
+  for (let i = 0; i < history.length; i++) {
+    const move = history[i];
+
+    // Apply vanish for this move if any
+    if (move.vanished) {
+      board[move.vanished.cell] = null;
+      playerMarks[move.vanished.symbol] = playerMarks[move.vanished.symbol].filter(
+        (c) => c !== move.vanished!.cell
+      );
+    }
+
+    // Apply placement
+    board[move.cell] = move.player;
+    playerMarks[move.player].push(move.cell);
+
+    // Check if the current move itself won the game
+    const currentMoves = playerMarks[move.player];
+    const isWin = checkWin(currentMoves, gridSize) !== null;
+
+    if (isWin) {
+      insights.push({
+        stepIndex: i,
+        hasWarning: false,
+        isTrap: false,
+        reason: 'none',
+      });
+      continue;
+    }
+
+    // Next opponent to move
+    let opponent: MarkSymbol = move.player === 'X' ? 'O' : 'X';
+    if (config.playerCount > 2) {
+      const activeSymbols = MARK_SYMBOLS.slice(0, config.playerCount);
+      const curIdx = activeSymbols.indexOf(move.player);
+      opponent = activeSymbols[(curIdx + 1) % config.playerCount];
+    }
+
+    // Check if opponent has an immediate winning reply available
+    const oppMarks = playerMarks[opponent] || [];
+    let oppSimMarks = [...oppMarks];
+    const oppSimBoard = [...board];
+
+    // If opponent already has maximum marks, oldest vanishes before placement
+    if (oppSimMarks.length >= (config.marksPerPlayer || 3)) {
+      const oldestOppMark = oppSimMarks[0];
+      oppSimBoard[oldestOppMark] = null;
+      oppSimMarks = oppSimMarks.slice(1);
+    }
+
+    // Check all empty cells on oppSimBoard
+    let opponentCanWin = false;
+    for (let c = 0; c < totalCells; c++) {
+      if (oppSimBoard[c] === null) {
+        const candidateMarks = [...oppSimMarks, c];
+        if (checkWin(candidateMarks, gridSize) !== null) {
+          opponentCanWin = true;
+          break;
+        }
+      }
+    }
+
+    insights.push({
+      stepIndex: i,
+      hasWarning: opponentCanWin,
+      isTrap: opponentCanWin,
+      reason: opponentCanWin ? 'opponent_win_available' : 'none',
+    });
+  }
+
+  return insights;
+}
+
+export interface BoardStepState {
+  board: (MarkSymbol | null)[];
+  playerMoves: Record<MarkSymbol, number[]>;
+  lastMove: MoveRecord;
+  winner: MarkSymbol | null;
+  winningLine: [number, number, number] | null;
+}
+
+/**
+ * Reconstructs board and player moves at a specific step in history (0-indexed).
+ */
+export function getBoardAtMove(
+  history: MoveRecord[],
+  targetStep: number,
+  configOrGridSize: GameConfig | number = 3
+): BoardStepState | null {
+  if (!history || history.length === 0 || targetStep < 0 || targetStep >= history.length) {
+    return null;
+  }
+
+  const gridSize = typeof configOrGridSize === 'number' ? configOrGridSize : configOrGridSize.gridSize;
+  const totalCells = gridSize * gridSize;
+  const board: (MarkSymbol | null)[] = Array(totalCells).fill(null);
+  const playerMoves: Record<MarkSymbol, number[]> = {
+    X: [],
+    O: [],
+    '▲': [],
+    '■': [],
+  };
+
+  for (let i = 0; i <= targetStep; i++) {
+    const move = history[i];
+    if (move.vanished) {
+      board[move.vanished.cell] = null;
+      playerMoves[move.vanished.symbol] = playerMoves[move.vanished.symbol].filter(
+        (c) => c !== move.vanished!.cell
+      );
+    }
+    board[move.cell] = move.player;
+    playerMoves[move.player].push(move.cell);
+  }
+
+  const currentMove = history[targetStep];
+  const winningLine = checkWin(playerMoves[currentMove.player], gridSize);
+  const winner = winningLine ? currentMove.player : null;
+
+  return {
+    board,
+    playerMoves,
+    lastMove: currentMove,
+    winner,
+    winningLine,
+  };
 }
 
