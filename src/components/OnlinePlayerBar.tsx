@@ -239,11 +239,15 @@ export const OnlinePlayerBar: React.FC<OnlinePlayerBarProps> = ({
             }`}
             style={{
               borderColor: isTurn ? config.hex : undefined,
-              boxShadow: isTurn ? `0 0 20px ${config.glow}` : undefined,
+              boxShadow: isTurn
+                ? seat.isBot
+                  ? `0 0 25px ${config.glow}, inset 0 0 10px ${config.glow}`
+                  : `0 0 20px ${config.glow}`
+                : undefined,
             }}
           >
-            {/* Thin countdown bar around active player card (No text) */}
-            {isTurn && (
+            {/* Thin countdown bar around active player card (No text) - human turns only */}
+            {isTurn && !seat.isBot && (
               <div className="absolute top-0 left-0 right-0 h-1 bg-slate-800 overflow-hidden">
                 <div
                   className="h-full transition-all duration-100 ease-linear"
@@ -275,7 +279,17 @@ export const OnlinePlayerBar: React.FC<OnlinePlayerBarProps> = ({
                 {/* Identity: Bot or Human */}
                 <div className="flex items-center text-slate-300">
                   {seat.isBot ? (
-                    <Bot size={15} className="text-purple-400 animate-pulse" />
+                    <div className="flex items-center gap-1">
+                      <Bot size={15} className="text-purple-400" />
+                      {/* Three pulsing dots thinking indicator (icon-only) */}
+                      {isTurn && (
+                        <div className="flex items-center gap-0.5 ml-0.5 text-purple-400" title="Bot thinking">
+                          <span className="w-1 h-1 rounded-full bg-current animate-bounce [animation-delay:0ms]" />
+                          <span className="w-1 h-1 rounded-full bg-current animate-bounce [animation-delay:150ms]" />
+                          <span className="w-1 h-1 rounded-full bg-current animate-bounce [animation-delay:300ms]" />
+                        </div>
+                      )}
+                    </div>
                   ) : (
                     <User size={14} className={isMySeat ? 'text-cyan-300' : 'text-slate-400'} />
                   )}

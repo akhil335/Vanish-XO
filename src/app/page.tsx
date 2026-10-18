@@ -9,6 +9,8 @@ import {
   Player,
   getBoardAtMove,
   getMoveInsights,
+  BOT_TIMING_CONFIG,
+  getBotThinkingDelay,
 } from '@/lib/game';
 import { soundManager, triggerHaptic } from '@/lib/audio';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -284,8 +286,32 @@ function HomeContent() {
     setSoundEnabled(nextVal);
   };
 
-  // Derived bot thinking status
+  // Bot thinking & animation lock state
   const isBotThinking = mode === 'bot' && gameState.turn === 'O' && gameState.winner === null;
+  const [isAnimating, setIsAnimating] = useState(false);
+  const isInputLockedRef = useRef(false);
+  const botSchedulerKeyRef = useRef<string | null>(null);
+
+  // Cancel pending bot timers on: game over, Again/rematch, Home, changing settings, unmounting page, switching modes
+  const cancelBotScheduler = useCallback(() => {
+    if (botTimerRef.current) {
+      clearTimeout(botTimerRef.current);
+      botTimerRef.current = null;
+    }
+    botSchedulerKeyRef.current = null;
+  }, []);
+
+  // Cancel bot timer on unmount
+  useEffect(() => {
+    return () => cancelBotScheduler();
+  }, [cancelBotScheduler]);
+
+  // Cancel bot timer on game over
+  useEffect(() => {
+    if (gameState.winner !== null) {
+      cancelBotScheduler();
+    }
+  }, [gameState.winner, cancelBotScheduler]);
 
   // Replay State
   const [isReplay, setIsReplay] = useState(false);
@@ -310,18 +336,18 @@ function HomeContent() {
       track('rematch_clicked', { mode: 'offline' });
     }
     hasTrackedOfflineGameStartedRef.current = false;
-    if (botTimerRef.current) {
-      clearTimeout(botTimerRef.current);
-      botTimerRef.current = null;
-    }
+    cancelBotScheduler();
+    setIsAnimating(false);
+    isInputLockedRef.current = false;
     setIsReplay(false);
     setVanishedAnim(null);
     setLastRankDelta(null);
     setGameState(createInitialState('X'));
-  }, [gameState.winner]);
+  }, [gameState.winner, cancelBotScheduler]);
 
   // Mode change
   const handleModeChange = (newMode: 'bot' | 'pvp') => {
+    cancelBotScheduler();
     setMode(newMode);
     setScore({ X: 0, O: 0 });
     setStreak(0);
@@ -332,6 +358,7 @@ function HomeContent() {
 
   // Difficulty change
   const handleDifficultyChange = (diff: 'easy' | 'medium' | 'hard') => {
+    cancelBotScheduler();
     setBotDifficulty(diff);
   };
 
@@ -385,12 +412,18 @@ function HomeContent() {
   const executeMove = useCallback((cellIndex: number) => {
     setGameState((prevState) => {
       if (prevState.winner !== null || prevState.board[cellIndex] !== null) {
+        setIsAnimating(false);
+        isInputLockedRef.current = false;
         return prevState;
       }
 
       const playerMoving = prevState.turn;
       const { nextState, success } = placeMark(prevState, cellIndex);
-      if (!success) return prevState;
+      if (!success) {
+        setIsAnimating(false);
+        isInputLockedRef.current = false;
+        return prevState;
+      }
 
       // Sound for placement
       soundManager.playPlace(playerMoving);
@@ -425,6 +458,13 @@ function HomeContent() {
         recordGameCompletion(nextState, winner);
       }
 
+      // Wait for animations to complete before unlocking human input
+      const animTime = nextState.lastVanished ? 520 : 260;
+      setTimeout(() => {
+        setIsAnimating(false);
+        isInputLockedRef.current = false;
+      }, animTime);
+
       return nextState;
     });
   }, [lastWinner, mode, recordGameCompletion]);
@@ -433,8 +473,12 @@ function HomeContent() {
   const handleCellClick = (index: number) => {
     if (gameState.winner !== null) return;
     if (gameState.board[index] !== null) return;
-    if (isBotThinking) return;
-    if (mode === 'bot' && gameState.turn === 'O') return;
+    if (isInputLockedRef.current || isAnimating || isBotThinking) return;
+    if (mode === 'bot' && gameState.turn !== 'X') return;
+
+    // Lock input against double taps
+    isInputLockedRef.current = true;
+    setIsAnimating(true);
 
     if (gameState.moveCount === 0 && !hasTrackedOfflineGameStartedRef.current) {
       hasTrackedOfflineGameStartedRef.current = true;
@@ -448,60 +492,90 @@ function HomeContent() {
     executeMove(index);
   };
 
-  // Bot auto-play loop (offline mode)
+  // One Turn Scheduler for Bot turns (offline mode)
   useEffect(() => {
     if (mode !== 'bot') return;
-    if (gameState.winner !== null) return;
-    if (gameState.turn !== 'O') return;
+    if (gameState.winner !== null) {
+      cancelBotScheduler();
+      return;
+    }
+    if (gameState.turn !== 'O') {
+      return;
+    }
+
+    // Key scheduler by move number and current player to prevent StrictMode duplicate timers
+    const turnKey = `${gameState.moveCount}-${gameState.turn}`;
+    if (botSchedulerKeyRef.current === turnKey) return;
+    botSchedulerKeyRef.current = turnKey;
+
+    // 1. Immediately compute the bot's move in the background
+    const plannedBotMove = getBotMove(gameState, botDifficulty);
+    if (plannedBotMove === -1) return;
+
+    // 2. Compute delay:
+    // (a) Previous move's placement & vanish animations finish (~520ms if vanish, ~260ms otherwise)
+    const animWait = gameState.lastVanished ? BOT_TIMING_CONFIG.animationDuration : 260;
+    // (b) Random thinking delay according to difficulty + jitter + first-move bonus
+    const isFirstMove = gameState.moveCount <= 1;
+    const thinkingDelay = getBotThinkingDelay(botDifficulty, { isFirstMove });
+    const totalDelay = animWait + thinkingDelay;
 
     botTimerRef.current = setTimeout(() => {
+      botTimerRef.current = null;
+
       setGameState((currentState) => {
+        // Safety: bot must never move after game ended or if turn changed
         if (currentState.turn !== 'O' || currentState.winner !== null) {
           return currentState;
         }
 
-        const botMove = getBotMove(currentState, botDifficulty);
-        if (botMove !== -1) {
-          const { nextState, success } = placeMark(currentState, botMove);
-          if (success) {
-            soundManager.playPlace('O');
+        const { nextState, success } = placeMark(currentState, plannedBotMove);
+        if (success) {
+          soundManager.playPlace('O');
 
-            if (nextState.lastVanished) {
-              soundManager.playVanish();
-              triggerHaptic('vanish');
-              setVanishedAnim({
-                cell: nextState.lastVanished.cell,
-                player: nextState.lastVanished.player,
-                id: Date.now(),
-              });
-            }
-
-            if (nextState.winner) {
-              const winner = nextState.winner;
-              setScore((prev) => ({
-                ...prev,
-                [winner]: prev[winner] + 1,
-              }));
-              setStreak((prev) => (lastWinner === winner ? prev + 1 : 1));
-              setLastWinner(winner);
-
-              recordGameCompletion(nextState, winner);
-            }
-
-            return nextState;
+          if (nextState.lastVanished) {
+            soundManager.playVanish();
+            triggerHaptic('vanish');
+            setVanishedAnim({
+              cell: nextState.lastVanished.cell,
+              player: nextState.lastVanished.player,
+              id: Date.now(),
+            });
           }
+
+          if (nextState.winner) {
+            const winner = nextState.winner;
+            setScore((prev) => ({
+              ...prev,
+              [winner]: prev[winner] + 1,
+            }));
+            setStreak((prev) => (lastWinner === winner ? prev + 1 : 1));
+            setLastWinner(winner);
+
+            recordGameCompletion(nextState, winner);
+          }
+
+          return nextState;
         }
 
         return currentState;
       });
-    }, 500);
+    }, totalDelay);
 
     return () => {
       if (botTimerRef.current) {
         clearTimeout(botTimerRef.current);
+        botTimerRef.current = null;
       }
     };
-  }, [mode, gameState.turn, gameState.winner, botDifficulty, lastWinner, recordGameCompletion]);
+  }, [
+    mode,
+    gameState,
+    botDifficulty,
+    lastWinner,
+    recordGameCompletion,
+    cancelBotScheduler,
+  ]);
 
   return (
     <main className="min-h-screen w-full flex flex-col items-center justify-between px-3 py-4 sm:py-6 overflow-x-hidden">
@@ -558,6 +632,7 @@ function HomeContent() {
             replayStepIndex={replayStepIndex}
             totalReplaySteps={gameState.history?.length || 0}
             isReplayTrap={currentReplayInsight?.hasWarning}
+            hadVanish={Boolean(gameState.lastVanished)}
           />
         )}
 
@@ -576,6 +651,7 @@ function HomeContent() {
             streak={streak}
             onOpenProfile={() => setIsProfileOpen(true)}
             rankTierColor={currentRankInfo.color}
+            isBotThinking={isBotThinking}
           />
         )}
 
@@ -583,7 +659,7 @@ function HomeContent() {
         <GameBoard
           state={gameState}
           onCellClick={handleCellClick}
-          disabled={isBotThinking || isReplay}
+          disabled={isBotThinking || isAnimating || (mode === 'bot' && gameState.turn !== 'X') || isReplay}
           vanishedAnim={vanishedAnim}
           onVanishedAnimComplete={() => setVanishedAnim(null)}
           boardOverride={isReplay && currentReplayState ? currentReplayState.board : undefined}

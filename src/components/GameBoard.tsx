@@ -1,8 +1,8 @@
 'use client';
 
-import React from 'react';
-import { motion } from 'framer-motion';
-import { GameState, getMarkAgeIndex, getMarkAgeForSymbol } from '@/lib/game';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { motion, useReducedMotion } from 'framer-motion';
+import { GameState, getMarkAgeIndex, getMarkAgeForSymbol, getWinLineGeometry } from '@/lib/game';
 import { MarkSymbol, RoomState, SEAT_COLORS } from '@/lib/types';
 import { MarkIcon } from './MarkIcon';
 import { ParticleDissolve } from './ParticleDissolve';
@@ -22,6 +22,7 @@ export interface GameBoardProps {
   winnerOverride?: MarkSymbol | null;
   boardOverride?: (MarkSymbol | null)[];
   isReplay?: boolean;
+  onWinLineComplete?: () => void;
 }
 
 export const GameBoard: React.FC<GameBoardProps> = ({
@@ -38,6 +39,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   winnerOverride,
   boardOverride,
   isReplay = false,
+  onWinLineComplete,
 }) => {
   const board = boardOverride
     ? boardOverride
@@ -129,6 +131,103 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     maxHeight: `min(calc(100vw - 20px), calc(100dvh - 200px), ${maxDimensionPx}px)`,
   };
 
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const isWinActive = Boolean(winner && winningLine);
+  const [winLineAnimated, setWinLineAnimated] = useState(false);
+  const [winLineCompleted, setWinLineCompleted] = useState(false);
+  const prefersReducedMotion = useReducedMotion();
+
+  const canDrawLine = isWinActive && (isReplay || winLineAnimated);
+  const lineDrawn = isWinActive && (isReplay || winLineCompleted);
+
+  // Sequence win line drawing:
+  // Order of events on a win: placement animation, then vanish dissolve if one happened on same move,
+  // then the line draws, then the other marks dim and winner icon/confetti appear.
+  useEffect(() => {
+    if (!isWinActive || isReplay) return;
+
+    // Live win:
+    const hadVanish = Boolean(
+      vanishedAnim ||
+      state?.lastVanished ||
+      roomState?.lastVanished
+    );
+    const delayBeforeLine = hadVanish ? 520 : 260;
+
+    const timer = setTimeout(() => {
+      setWinLineAnimated(true);
+    }, delayBeforeLine);
+
+    return () => {
+      clearTimeout(timer);
+      setWinLineAnimated(false);
+      setWinLineCompleted(false);
+    };
+  }, [isWinActive, isReplay, vanishedAnim, state?.lastVanished, roomState?.lastVanished]);
+
+  // Actual rendered cell rectangles measurement
+  const [renderedLineCoords, setRenderedLineCoords] = useState<{
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+  } | null>(null);
+
+  const updateRenderedCoords = useCallback(() => {
+    if (!winningLine || !gridRef.current) {
+      setRenderedLineCoords(null);
+      return;
+    }
+    const geo = getWinLineGeometry(winningLine, gridSize);
+    const el1 = document.getElementById(`cell-${geo.startCell}`);
+    const el2 = document.getElementById(`cell-${geo.endCell}`);
+    const gridEl = gridRef.current;
+    if (el1 && el2 && gridEl) {
+      const r1 = el1.getBoundingClientRect();
+      const r2 = el2.getBoundingClientRect();
+      const g = gridEl.getBoundingClientRect();
+
+      if (r1.width > 0 && r2.width > 0 && g.width > 0) {
+        const c1x = r1.left + r1.width / 2 - g.left;
+        const c1y = r1.top + r1.height / 2 - g.top;
+        const c2x = r2.left + r2.width / 2 - g.left;
+        const c2y = r2.top + r2.height / 2 - g.top;
+
+        const dx = c2x - c1x;
+        const dy = c2y - c1y;
+        const dist = Math.hypot(dx, dy);
+        const extend = r1.width * 0.42;
+
+        if (dist > 0) {
+          const ux = dx / dist;
+          const uy = dy / dist;
+          setRenderedLineCoords({
+            x1: c1x - ux * extend,
+            y1: c1y - uy * extend,
+            x2: c2x + ux * extend,
+            y2: c2y + uy * extend,
+          });
+          return;
+        }
+      }
+    }
+    setRenderedLineCoords(null);
+  }, [winningLine, gridSize]);
+
+  useEffect(() => {
+    updateRenderedCoords();
+    if (!gridRef.current) return;
+    const ro = new ResizeObserver(() => {
+      updateRenderedCoords();
+    });
+    ro.observe(gridRef.current);
+    window.addEventListener('resize', updateRenderedCoords);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', updateRenderedCoords);
+    };
+  }, [updateRenderedCoords]);
+
   return (
     <div
       className="relative w-full aspect-square mx-auto p-1.5 sm:p-2.5 select-none transition-all duration-300"
@@ -144,6 +243,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
 
       {/* Main Grid Frame */}
       <div
+        ref={gridRef}
         className={`relative w-full h-full rounded-3xl p-2.5 sm:p-3 bg-[#0a0d17]/90 backdrop-blur-md border-2 transition-all duration-300 grid ${gapClass}`}
         style={{
           borderColor: boardBorderColor,
@@ -154,7 +254,8 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       >
         {board.map((mark, index) => {
           const isWinningCell = winningLine ? winningLine.includes(index) : false;
-          const isDimmed = winner !== null && !isWinningCell;
+          // Marks only dim once the win line has fully finished drawing (or in Replay)
+          const isDimmed = (lineDrawn || isReplay) && winner !== null && !isWinningCell;
           const ageInfo = getAge(index);
           const isVanishingHere = vanishedAnim && vanishedAnim.cell === index;
           const isPlacedCell = effectiveLastMoveCell === index;
@@ -176,19 +277,25 @@ export const GameBoard: React.FC<GameBoardProps> = ({
               onClick={() => onCellClick(index)}
               whileHover={isClickable ? { scale: 1.02, backgroundColor: 'rgba(30, 41, 59, 0.7)' } : {}}
               whileTap={isClickable ? { scale: 0.96 } : {}}
-              className={`relative flex items-center justify-center ${cellRoundedClass} transition-all duration-200 select-none overflow-hidden touch-manipulation cursor-pointer ${
+              className={`relative flex items-center justify-center ${cellRoundedClass} transition-all duration-200 select-none overflow-hidden touch-manipulation ${
                 mark
                   ? 'bg-slate-900/60 border border-white/5'
                   : 'bg-slate-900/30 border border-white/[0.04] hover:border-white/20 active:bg-slate-800/40'
-              } ${!isClickable && !mark ? 'cursor-default' : ''}`}
+              } ${
+                isClickable
+                  ? 'cursor-pointer'
+                  : disabled && !mark && !winner
+                  ? 'cursor-not-allowed opacity-60'
+                  : 'cursor-default'
+              }`}
             >
-              {/* Winning Line Highlighting with 1s start animation sequence */}
+              {/* Winning Cell Glow */}
               {isWinningCell && winnerConfig && (
                 <motion.div
-                  initial={{ opacity: effectiveIsGameOver && !isReplay ? 0.2 : 1 }}
+                  initial={{ opacity: effectiveIsGameOver && !isReplay && !lineDrawn ? 0.2 : 1 }}
                   animate={{ opacity: 1 }}
                   transition={{
-                    delay: effectiveIsGameOver && !isReplay ? 0.65 : 0,
+                    delay: effectiveIsGameOver && !isReplay ? 0.3 : 0,
                     duration: 0.35,
                     ease: 'easeOut',
                   }}
@@ -211,8 +318,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                     opacity: 1,
                   }}
                   transition={{
-                    delay: effectiveIsGameOver && !isReplay ? 0.35 : 0,
-                    duration: 0.4,
+                    duration: 0.35,
                     ease: 'easeOut',
                   }}
                   className="absolute inset-1 sm:inset-1.5 rounded-xl sm:rounded-2xl border-2 pointer-events-none z-20"
@@ -316,6 +422,82 @@ export const GameBoard: React.FC<GameBoardProps> = ({
             </motion.button>
           );
         })}
+
+        {/* Strike Line Overlay across winning cells (Pen stroke animation in winner's color with glow) */}
+        {canDrawLine && winningLine && winnerConfig && (() => {
+          const fallbackGeo = getWinLineGeometry(winningLine, gridSize);
+          const coords = renderedLineCoords || {
+            x1: fallbackGeo.x1,
+            y1: fallbackGeo.y1,
+            x2: fallbackGeo.x2,
+            y2: fallbackGeo.y2,
+          };
+          const lineLength = Math.hypot(coords.x2 - coords.x1, coords.y2 - coords.y1) || 100;
+          const strokeWidth = renderedLineCoords
+            ? (gridSize >= 5 ? 5 : 6.5)
+            : (gridSize >= 5 ? 1.6 : 2.2);
+          const coreWidth = renderedLineCoords
+            ? (gridSize >= 5 ? 2 : 2.5)
+            : (gridSize >= 5 ? 0.6 : 0.8);
+          const animDuration = prefersReducedMotion || isReplay ? 0 : 0.5;
+
+          return (
+            <div
+              className={`absolute pointer-events-none z-30 ${
+                renderedLineCoords ? 'inset-0' : 'inset-2.5 sm:inset-3'
+              }`}
+            >
+              <svg
+                className="w-full h-full overflow-visible pointer-events-none"
+                viewBox={renderedLineCoords ? undefined : '0 0 100 100'}
+                preserveAspectRatio="none"
+              >
+                {/* Glowing Outer Stroke */}
+                <motion.line
+                  x1={coords.x1}
+                  y1={coords.y1}
+                  x2={coords.x2}
+                  y2={coords.y2}
+                  stroke={winnerConfig.hex}
+                  strokeWidth={strokeWidth}
+                  strokeLinecap="round"
+                  strokeDasharray={lineLength}
+                  initial={{ strokeDashoffset: animDuration === 0 ? 0 : lineLength }}
+                  animate={{ strokeDashoffset: 0 }}
+                  transition={{
+                    duration: animDuration,
+                    ease: 'easeOut',
+                  }}
+                  style={{
+                    filter: `drop-shadow(0 0 8px ${winnerConfig.hex}) drop-shadow(0 0 16px ${winnerConfig.glow})`,
+                  }}
+                  onAnimationComplete={() => {
+                    setWinLineCompleted(true);
+                    onWinLineComplete?.();
+                  }}
+                />
+                {/* Crisp Neon Inner Core */}
+                <motion.line
+                  x1={coords.x1}
+                  y1={coords.y1}
+                  x2={coords.x2}
+                  y2={coords.y2}
+                  stroke="#ffffff"
+                  strokeWidth={coreWidth}
+                  strokeLinecap="round"
+                  strokeDasharray={lineLength}
+                  initial={{ strokeDashoffset: animDuration === 0 ? 0 : lineLength }}
+                  animate={{ strokeDashoffset: 0 }}
+                  transition={{
+                    duration: animDuration,
+                    ease: 'easeOut',
+                  }}
+                  className="opacity-80"
+                />
+              </svg>
+            </div>
+          );
+        })()}
       </div>
     </div>
   );

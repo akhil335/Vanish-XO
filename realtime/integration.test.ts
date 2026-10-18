@@ -149,7 +149,7 @@ describe('Vanish XO - Multi-Client Integration Tests (PartyServer on Cloudflare 
     expect(states.s2?.board[3]).toBe('O');
 
     // 9. Bot's turn (Seat 2, '▲') automatically executes
-    await new Promise((r) => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, 2600));
 
     // Confirm that Bot placed a mark on the board!
     const botMarkPlaced = states.s1?.board.some((c: MarkSymbol | null) => c === '▲');

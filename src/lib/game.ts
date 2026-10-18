@@ -76,6 +76,137 @@ export function getWinningLines(gridSize: number = 3, streak: number = 3): [numb
 
 export const WINNING_LINES = getWinningLines(3, 3);
 
+export interface WinLineGeometry {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  type: 'row' | 'column' | 'diagonal-main' | 'diagonal-anti';
+  startCell: number;
+  endCell: number;
+  angle: number;
+}
+
+/**
+ * Pure function to calculate SVG coordinates (percentages 0-100) for a strike line
+ * crossing winning cells, extending a little past the first and last cell.
+ */
+export function getWinLineGeometry(cells: number[], boardSize: number = 3): WinLineGeometry {
+  if (!cells || cells.length === 0) {
+    return {
+      x1: 0,
+      y1: 0,
+      x2: 0,
+      y2: 0,
+      type: 'row',
+      startCell: 0,
+      endCell: 0,
+      angle: 0,
+    };
+  }
+
+  // 1. Sort cells along line direction (by row ascending, then col ascending)
+  const sorted = [...cells].sort((a, b) => {
+    const rA = Math.floor(a / boardSize);
+    const rB = Math.floor(b / boardSize);
+    if (rA !== rB) return rA - rB;
+    return (a % boardSize) - (b % boardSize);
+  });
+
+  const startCell = sorted[0];
+  const endCell = sorted[sorted.length - 1];
+
+  const r1 = Math.floor(startCell / boardSize);
+  const c1 = startCell % boardSize;
+  const r2 = Math.floor(endCell / boardSize);
+  const c2 = endCell % boardSize;
+
+  let type: 'row' | 'column' | 'diagonal-main' | 'diagonal-anti';
+  if (r1 === r2) {
+    type = 'row';
+  } else if (c1 === c2) {
+    type = 'column';
+  } else if (c1 < c2) {
+    type = 'diagonal-main';
+  } else {
+    type = 'diagonal-anti';
+  }
+
+  // Cell centers in percentage (0 to 100)
+  const cellSize = 100 / boardSize;
+  const c1x = (c1 + 0.5) * cellSize;
+  const c1y = (r1 + 0.5) * cellSize;
+  const c2x = (c2 + 0.5) * cellSize;
+  const c2y = (r2 + 0.5) * cellSize;
+
+  const dx = c2x - c1x;
+  const dy = c2y - c1y;
+  const dist = Math.hypot(dx, dy);
+
+  // Extend past cell centers by ~42% of a cell so it fully crosses the first and last marks
+  const extend = cellSize * 0.42;
+
+  let x1 = c1x;
+  let y1 = c1y;
+  let x2 = c2x;
+  let y2 = c2y;
+
+  if (dist > 0) {
+    const ux = dx / dist;
+    const uy = dy / dist;
+    x1 = c1x - ux * extend;
+    y1 = c1y - uy * extend;
+    x2 = c2x + ux * extend;
+    y2 = c2y + uy * extend;
+  }
+
+  const angle = Math.round(Math.atan2(dy, dx) * (180 / Math.PI) * 100) / 100;
+
+  return {
+    x1: Math.round(x1 * 100) / 100,
+    y1: Math.round(y1 * 100) / 100,
+    x2: Math.round(x2 * 100) / 100,
+    y2: Math.round(y2 * 100) / 100,
+    type,
+    startCell,
+    endCell,
+    angle,
+  };
+}
+
+/**
+ * Human-like bot thinking & animation timing configuration.
+ */
+export const BOT_TIMING_CONFIG = {
+  easy: { min: 700, max: 1300 },
+  medium: { min: 900, max: 1600 },
+  hard: { min: 1100, max: 1900 },
+  jitterMax: 50,
+  firstMoveBonus: 250,
+  animationDuration: 600, // ms
+};
+
+/**
+ * Returns a randomized thinking delay in ms according to the bot's difficulty,
+ * with jitter and first-move bonus.
+ */
+export function getBotThinkingDelay(
+  difficulty: 'easy' | 'medium' | 'hard' = 'medium',
+  options?: { isFirstMove?: boolean; clampToRange?: boolean }
+): number {
+  const cfg = BOT_TIMING_CONFIG[difficulty] || BOT_TIMING_CONFIG.medium;
+  const range = cfg.max - cfg.min;
+  const jitter = (Math.random() * 2 - 1) * BOT_TIMING_CONFIG.jitterMax;
+  let delay = cfg.min + Math.random() * range + jitter;
+  if (options?.isFirstMove) {
+    delay += BOT_TIMING_CONFIG.firstMoveBonus;
+  }
+  if (!options?.isFirstMove || options?.clampToRange) {
+    delay = Math.max(cfg.min, Math.min(cfg.max, delay));
+  }
+  return Math.round(delay);
+}
+
 export interface VanishedInfo {
   player: Player;
   cell: number;

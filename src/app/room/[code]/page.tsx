@@ -493,10 +493,16 @@ function RoomPageContent() {
   const roomPhase = roomState ? (roomState.phase ?? roomState.status) : 'uninitialized';
   const isMyTurn = roomPhase === 'playing' && roomState?.turnSeatIndex === mySeatIndex;
 
+  const isInputLockedRef = useRef(false);
+
   // Actions
   const handleCellClick = (cellIndex: number) => {
-    if (!socketRef.current || !isMyTurn) return;
+    if (!socketRef.current || !isMyTurn || isInputLockedRef.current) return;
+    isInputLockedRef.current = true;
     socketRef.current.send(JSON.stringify({ type: 'place', cell: cellIndex }));
+    setTimeout(() => {
+      isInputLockedRef.current = false;
+    }, 300);
   };
 
   const handleSetSeats = (seatsCount: 2 | 3 | 4) => {
@@ -899,6 +905,7 @@ function RoomPageContent() {
             replayStepIndex={replayStepIndex}
             totalReplaySteps={effectiveRoomState.history?.length || 0}
             isReplayTrap={currentReplayInsight?.hasWarning}
+            hadVanish={Boolean(effectiveRoomState.lastVanished)}
           />
         )}
 

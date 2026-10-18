@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { GameRoomHandler, Main } from './room';
 import { LobbyHandler } from './lobby';
 import { ServerMessage, LobbyServerMessage } from '../src/lib/types';
@@ -1312,6 +1312,145 @@ describe('Lobby Sync and Host Ownership Bug Fixes (Required Scenarios)', () => {
       // 4P board is 6x6 = 36 cells
       expect(handler.state.config.gridSize).toBe(6);
       expect(handler.state.board.length).toBe(36);
+    });
+  });
+
+  describe('Human-like Bot Timing & Scheduling in Multiplayer Room', () => {
+    let handler: GameRoomHandler;
+    let hostMessages: ServerMessage[];
+
+    const sendHost = (m: string) => {
+      hostMessages.push(JSON.parse(m));
+    };
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      hostMessages = [];
+      handler = new GameRoomHandler('BOT_TIMING_ROOM');
+      handler.handleConnection('conn_host', sendHost);
+      handler.handleMessage('conn_host', JSON.stringify({ type: 'create', playerId: 'p_host', seatsCount: 4 }));
+      handler.handleMessage('conn_host', JSON.stringify({ type: 'set_bot_seat', seatIndex: 1, isBot: true }));
+      handler.handleMessage('conn_host', JSON.stringify({ type: 'set_bot_seat', seatIndex: 2, isBot: true }));
+      handler.handleMessage('conn_host', JSON.stringify({ type: 'set_bot_seat', seatIndex: 3, isBot: true }));
+      const startRes = handler.handleMessage('conn_host', JSON.stringify({ type: 'start' }));
+      expect(startRes.success).toBe(true);
+    });
+
+    afterEach(() => {
+      handler.cancelPendingBotMove();
+      vi.useRealTimers();
+    });
+
+    it('spaces consecutive bot moves by at least animation time plus minimum delay with unique timestamps', () => {
+      expect(handler.state.phase).toBe('playing');
+      expect(handler.state.turnSeatIndex).toBe(0);
+
+      const placeRes = handler.handleMessage('conn_host', JSON.stringify({ type: 'place', cell: 0 }));
+      expect(placeRes.success).toBe(true);
+
+      expect(handler.state.turnSeatIndex).toBe(1);
+      expect(handler.state.history?.length).toBe(1);
+
+      // Animation duration (600ms) + medium min delay (900ms) = 1500ms
+      // At 1400ms, bot 1 should not have moved yet
+      vi.advanceTimersByTime(1400);
+      expect(handler.state.turnSeatIndex).toBe(1);
+      expect(handler.state.history?.length).toBe(1);
+
+      const botMoveTimestamps: number[] = [];
+
+      // Advance until bot 1 executes
+      vi.advanceTimersByTime(1000);
+      expect(handler.state.turnSeatIndex).toBe(2);
+      expect(handler.state.history?.length).toBe(2);
+      botMoveTimestamps.push(Date.now());
+
+      // Bot 2 was scheduled after bot 1 finished. Advance until bot 2 executes
+      vi.advanceTimersByTime(2000);
+      expect(handler.state.turnSeatIndex).toBe(3);
+      expect(handler.state.history?.length).toBe(3);
+      botMoveTimestamps.push(Date.now());
+
+      // Advance until bot 3 executes
+      vi.advanceTimersByTime(2000);
+      expect(handler.state.turnSeatIndex).toBe(0); // Back to human host
+      expect(handler.state.history?.length).toBe(4);
+      botMoveTimestamps.push(Date.now());
+
+      // Verify no two bot moves share a timestamp
+      const uniqueTimestamps = new Set(botMoveTimestamps);
+      expect(uniqueTimestamps.size).toBe(3);
+
+      // Verify each move is spaced by at least 1500ms (animation 600ms + medium min 900ms)
+      expect(botMoveTimestamps[1] - botMoveTimestamps[0]).toBeGreaterThanOrEqual(1500);
+      expect(botMoveTimestamps[2] - botMoveTimestamps[1]).toBeGreaterThanOrEqual(1500);
+    });
+
+    it('ignores rapid human clicks during a bot turn', () => {
+      handler.handleMessage('conn_host', JSON.stringify({ type: 'place', cell: 0 }));
+      expect(handler.state.turnSeatIndex).toBe(1);
+
+      const initialMovesCount = handler.state.history?.length ?? 0;
+
+      const click1 = handler.handleMessage('conn_host', JSON.stringify({ type: 'place', cell: 1 }));
+      const click2 = handler.handleMessage('conn_host', JSON.stringify({ type: 'place', cell: 2 }));
+      const click3 = handler.handleMessage('conn_host', JSON.stringify({ type: 'place', cell: 3 }));
+
+      expect(click1.success).toBe(false);
+      expect(click1.error).toBe('NOT_YOUR_TURN');
+      expect(click2.success).toBe(false);
+      expect(click2.error).toBe('NOT_YOUR_TURN');
+      expect(click3.success).toBe(false);
+      expect(click3.error).toBe('NOT_YOUR_TURN');
+
+      expect(handler.state.history?.length).toBe(initialMovesCount);
+      expect(handler.state.board[1]).toBeNull();
+      expect(handler.state.board[2]).toBeNull();
+      expect(handler.state.board[3]).toBeNull();
+    });
+
+    it('cancels pending bot moves after game over', () => {
+      handler.handleMessage('conn_host', JSON.stringify({ type: 'place', cell: 0 }));
+      expect(handler.state.turnSeatIndex).toBe(1);
+
+      // Finish game
+      handler.state.winner = 'X';
+      handler.state.status = 'finished';
+      handler.state.phase = 'finished';
+      handler.cancelPendingBotMove();
+
+      const moveCountAtEnd = handler.state.history?.length ?? 0;
+
+      // Advance timers significantly — bot must not move after game over
+      vi.advanceTimersByTime(10000);
+      expect(handler.state.history?.length).toBe(moveCountAtEnd);
+    });
+
+    it('cancels pending bot moves after rematch', () => {
+      handler.handleMessage('conn_host', JSON.stringify({ type: 'place', cell: 0 }));
+      expect(handler.state.turnSeatIndex).toBe(1);
+
+      // Must be finished to rematch
+      handler.state.status = 'finished';
+      handler.state.phase = 'finished';
+
+      const rematchRes = handler.handleMessage('conn_host', JSON.stringify({ type: 'rematch' }));
+      expect(rematchRes.success).toBe(true);
+
+      // The previous pending bot move was cancelled; game reset
+      expect(handler.state.history?.length).toBe(0);
+      expect(handler.state.board.every((c) => c === null)).toBe(true);
+    });
+
+    it('cancels pending bot moves when human disconnects', () => {
+      handler.handleMessage('conn_host', JSON.stringify({ type: 'place', cell: 0 }));
+      expect(handler.state.turnSeatIndex).toBe(1);
+
+      handler.handleDisconnection('conn_host');
+
+      const movesBefore = handler.state.history?.length ?? 0;
+      vi.advanceTimersByTime(5000);
+      expect(handler.state.history?.length).toBe(movesBefore);
     });
   });
 });

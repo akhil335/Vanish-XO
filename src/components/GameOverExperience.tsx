@@ -33,6 +33,7 @@ export interface GameOverBannerProps {
   replayStepIndex?: number;
   totalReplaySteps?: number;
   isReplayTrap?: boolean;
+  hadVanish?: boolean;
 }
 
 export const GameOverBanner: React.FC<GameOverBannerProps> = ({
@@ -44,14 +45,32 @@ export const GameOverBanner: React.FC<GameOverBannerProps> = ({
   replayStepIndex = 0,
   totalReplaySteps = 0,
   isReplayTrap = false,
+  hadVanish = false,
 }) => {
   const isWinner = outcome === 'win';
   const isLoser = outcome === 'lose';
   const isSpectator = outcome === 'spectator';
 
-  // Confetti effect on game over (bursts from sides, never over the board)
-  useEffect(() => {
+  const [hasDelayedShown, setHasDelayedShown] = React.useState(false);
+  const readyToShow = Boolean(winner && (isReplay || hasDelayedShown));
+
+  React.useEffect(() => {
     if (!winner || isReplay) return;
+
+    // Wait for placement + vanish dissolve (if any) + pen stroke line draw (~500ms)
+    const delay = hadVanish ? 1040 : 760;
+    const timer = setTimeout(() => {
+      setHasDelayedShown(true);
+    }, delay);
+    return () => {
+      clearTimeout(timer);
+      setHasDelayedShown(false);
+    };
+  }, [winner, isReplay, hadVanish]);
+
+  // Confetti effect on game over (bursts from sides, only after line has finished drawing)
+  useEffect(() => {
+    if (!winner || isReplay || !readyToShow) return;
 
     if (isLoser) {
       soundManager.playLose();
@@ -92,9 +111,9 @@ export const GameOverBanner: React.FC<GameOverBannerProps> = ({
       }
     };
     frame();
-  }, [winner, isLoser, isReplay]);
+  }, [winner, isLoser, isReplay, readyToShow]);
 
-  if (!winner && !isReplay) return null;
+  if ((!winner && !isReplay) || (!readyToShow && !isReplay)) return null;
 
   const winnerConfig = winner ? (SEAT_COLORS[winner] || SEAT_COLORS.X) : SEAT_COLORS.X;
 

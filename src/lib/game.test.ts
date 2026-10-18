@@ -12,6 +12,9 @@ import {
   getHardBotMove,
   getMoveInsights,
   getBoardAtMove,
+  getWinLineGeometry,
+  BOT_TIMING_CONFIG,
+  getBotThinkingDelay,
   GameState,
 } from './game';
 import { generateRoomCode, isValidRoomCode, ROOM_CODE_CHARS } from './types';
@@ -552,6 +555,170 @@ describe('Vanish XO - Core Game Logic & Rules', () => {
       const winningBotMove = placeMark(afterHumanMove, 0).nextState;
       expect(winningBotMove.winner).toBe('O');
       expect(winningBotMove.winningLine).toEqual([0, 1, 2]);
+    });
+  });
+
+  describe('Winning Strike Line Geometry - getWinLineGeometry', () => {
+    it('computes correct geometry for 3x3 rows', () => {
+      const row0 = getWinLineGeometry([0, 1, 2], 3);
+      expect(row0.type).toBe('row');
+      expect(row0.startCell).toBe(0);
+      expect(row0.endCell).toBe(2);
+      expect(row0.y1).toBe(row0.y2);
+      expect(row0.x1).toBeLessThan(row0.x2);
+      // Center of cell 0 is (16.67, 16.67), line extends backwards past 16.67
+      expect(row0.x1).toBeLessThan(16.67);
+      // Center of cell 2 is (83.33, 16.67), line extends forwards past 83.33
+      expect(row0.x2).toBeGreaterThan(83.33);
+
+      const row2 = getWinLineGeometry([6, 7, 8], 3);
+      expect(row2.type).toBe('row');
+      expect(row2.y1).toBe(row2.y2);
+      expect(row2.x1).toBeLessThan(row2.x2);
+    });
+
+    it('computes correct geometry for 3x3 columns', () => {
+      const col0 = getWinLineGeometry([0, 3, 6], 3);
+      expect(col0.type).toBe('column');
+      expect(col0.startCell).toBe(0);
+      expect(col0.endCell).toBe(6);
+      expect(col0.x1).toBe(col0.x2);
+      expect(col0.y1).toBeLessThan(col0.y2);
+      expect(col0.y1).toBeLessThan(16.67);
+      expect(col0.y2).toBeGreaterThan(83.33);
+
+      const col1 = getWinLineGeometry([1, 4, 7], 3);
+      expect(col1.type).toBe('column');
+      expect(col1.x1).toBe(col1.x2);
+    });
+
+    it('computes correct geometry for 3x3 main diagonal (top-left to bottom-right)', () => {
+      const diag = getWinLineGeometry([0, 4, 8], 3);
+      expect(diag.type).toBe('diagonal-main');
+      expect(diag.startCell).toBe(0);
+      expect(diag.endCell).toBe(8);
+      expect(diag.x1).toBeLessThan(diag.x2);
+      expect(diag.y1).toBeLessThan(diag.y2);
+      expect(diag.x1).toBeLessThan(16.67);
+      expect(diag.y1).toBeLessThan(16.67);
+      expect(diag.x2).toBeGreaterThan(83.33);
+      expect(diag.y2).toBeGreaterThan(83.33);
+    });
+
+    it('computes correct geometry for 3x3 anti-diagonal (top-right to bottom-left)', () => {
+      const antiDiag = getWinLineGeometry([2, 4, 6], 3);
+      expect(antiDiag.type).toBe('diagonal-anti');
+      expect(antiDiag.startCell).toBe(2);
+      expect(antiDiag.endCell).toBe(6);
+      // Top-right to bottom-left: x decreases, y increases
+      expect(antiDiag.x1).toBeGreaterThan(antiDiag.x2);
+      expect(antiDiag.y1).toBeLessThan(antiDiag.y2);
+      expect(antiDiag.x1).toBeGreaterThan(83.33);
+      expect(antiDiag.y1).toBeLessThan(16.67);
+      expect(antiDiag.x2).toBeLessThan(16.67);
+      expect(antiDiag.y2).toBeGreaterThan(83.33);
+    });
+
+    it('handles unordered cell arrays and produces identical geometry', () => {
+      const ordered = getWinLineGeometry([0, 4, 8], 3);
+      const permuted = getWinLineGeometry([8, 0, 4], 3);
+      expect(permuted).toEqual(ordered);
+
+      const antiOrdered = getWinLineGeometry([2, 4, 6], 3);
+      const antiPermuted = getWinLineGeometry([6, 2, 4], 3);
+      expect(antiPermuted).toEqual(antiOrdered);
+    });
+
+    it('computes correct geometry for 5x5 boards (rows, columns, both diagonals of streak 3)', () => {
+      // 5x5 row: cells 11, 12, 13 (row 2, cols 1, 2, 3)
+      const row5 = getWinLineGeometry([11, 12, 13], 5);
+      expect(row5.type).toBe('row');
+      expect(row5.startCell).toBe(11);
+      expect(row5.endCell).toBe(13);
+      expect(row5.y1).toBe(row5.y2);
+      expect(row5.x1).toBeLessThan(row5.x2);
+
+      // 5x5 column: cells 2, 7, 12 (col 2, rows 0, 1, 2)
+      const col5 = getWinLineGeometry([2, 7, 12], 5);
+      expect(col5.type).toBe('column');
+      expect(col5.startCell).toBe(2);
+      expect(col5.endCell).toBe(12);
+      expect(col5.x1).toBe(col5.x2);
+      expect(col5.y1).toBeLessThan(col5.y2);
+
+      // 5x5 main diagonal: cells 6, 12, 18 (row 1 col 1, row 2 col 2, row 3 col 3)
+      const diag5 = getWinLineGeometry([6, 12, 18], 5);
+      expect(diag5.type).toBe('diagonal-main');
+      expect(diag5.x1).toBeLessThan(diag5.x2);
+      expect(diag5.y1).toBeLessThan(diag5.y2);
+
+      // 5x5 anti-diagonal: cells 8, 12, 16 (row 1 col 3, row 2 col 2, row 3 col 1)
+      const anti5 = getWinLineGeometry([8, 12, 16], 5);
+      expect(anti5.type).toBe('diagonal-anti');
+      expect(anti5.x1).toBeGreaterThan(anti5.x2);
+      expect(anti5.y1).toBeLessThan(anti5.y2);
+    });
+
+    it('computes correct geometry for 6x6 boards (rows, columns, both diagonals of streak 3)', () => {
+      // 6x6 row: cells 14, 15, 16 (row 2, cols 2, 3, 4)
+      const row6 = getWinLineGeometry([14, 15, 16], 6);
+      expect(row6.type).toBe('row');
+      expect(row6.startCell).toBe(14);
+      expect(row6.endCell).toBe(16);
+      expect(row6.y1).toBe(row6.y2);
+      expect(row6.x1).toBeLessThan(row6.x2);
+
+      // 6x6 column: cells 3, 9, 15 (col 3, rows 0, 1, 2)
+      const col6 = getWinLineGeometry([3, 9, 15], 6);
+      expect(col6.type).toBe('column');
+      expect(col6.startCell).toBe(3);
+      expect(col6.endCell).toBe(15);
+      expect(col6.x1).toBe(col6.x2);
+      expect(col6.y1).toBeLessThan(col6.y2);
+
+      // 6x6 main diagonal: cells 7, 14, 21 (row 1 col 1, row 2 col 2, row 3 col 3)
+      const diag6 = getWinLineGeometry([7, 14, 21], 6);
+      expect(diag6.type).toBe('diagonal-main');
+      expect(diag6.x1).toBeLessThan(diag6.x2);
+      expect(diag6.y1).toBeLessThan(diag6.y2);
+
+      // 6x6 anti-diagonal: cells 10, 15, 20 (row 1 col 4, row 2 col 3, row 3 col 2)
+      const anti6 = getWinLineGeometry([10, 15, 20], 6);
+      expect(anti6.type).toBe('diagonal-anti');
+      expect(anti6.x1).toBeGreaterThan(anti6.x2);
+      expect(anti6.y1).toBeLessThan(anti6.y2);
+    });
+  });
+
+  describe('Bot Timing Configuration & Delays', () => {
+    it('delays stay within each difficulty range', () => {
+      // Easy: 700 - 1300 ms
+      for (let i = 0; i < 50; i++) {
+        const delay = getBotThinkingDelay('easy');
+        expect(delay).toBeGreaterThanOrEqual(BOT_TIMING_CONFIG.easy.min);
+        expect(delay).toBeLessThanOrEqual(BOT_TIMING_CONFIG.easy.max);
+      }
+
+      // Medium: 900 - 1600 ms
+      for (let i = 0; i < 50; i++) {
+        const delay = getBotThinkingDelay('medium');
+        expect(delay).toBeGreaterThanOrEqual(BOT_TIMING_CONFIG.medium.min);
+        expect(delay).toBeLessThanOrEqual(BOT_TIMING_CONFIG.medium.max);
+      }
+
+      // Hard: 1100 - 1900 ms
+      for (let i = 0; i < 50; i++) {
+        const delay = getBotThinkingDelay('hard');
+        expect(delay).toBeGreaterThanOrEqual(BOT_TIMING_CONFIG.hard.min);
+        expect(delay).toBeLessThanOrEqual(BOT_TIMING_CONFIG.hard.max);
+      }
+    });
+
+    it('adds first move bonus when isFirstMove is true', () => {
+      const normalDelay = getBotThinkingDelay('easy', { isFirstMove: false });
+      const firstMoveDelay = getBotThinkingDelay('easy', { isFirstMove: true });
+      expect(normalDelay).toBeGreaterThanOrEqual(BOT_TIMING_CONFIG.easy.min);
+      expect(firstMoveDelay).toBeGreaterThanOrEqual(BOT_TIMING_CONFIG.easy.min + BOT_TIMING_CONFIG.firstMoveBonus - BOT_TIMING_CONFIG.jitterMax);
     });
   });
 });

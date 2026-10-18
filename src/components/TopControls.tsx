@@ -20,6 +20,7 @@ interface TopControlsProps {
   streak: number;
   onOpenProfile?: () => void;
   rankTierColor?: string;
+  isBotThinking?: boolean;
 }
 
 export const TopControls: React.FC<TopControlsProps> = ({
@@ -35,6 +36,7 @@ export const TopControls: React.FC<TopControlsProps> = ({
   streak,
   onOpenProfile,
   rankTierColor,
+  isBotThinking = false,
 }) => {
   const router = useRouter();
 
@@ -206,7 +208,9 @@ export const TopControls: React.FC<TopControlsProps> = ({
         <div
           className={`flex items-center justify-between h-11 px-2.5 rounded-xl transition-all duration-300 border ${
             isOTurn
-              ? 'bg-pink-950/40 border-pink-500/80 shadow-[0_0_16px_rgba(255,0,127,0.3)] scale-[1.01]'
+              ? mode === 'bot' && isBotThinking
+                ? 'bg-pink-950/60 border-pink-400 shadow-[0_0_24px_rgba(255,0,127,0.6),_inset_0_0_8px_rgba(255,0,127,0.3)] scale-[1.02]'
+                : 'bg-pink-950/40 border-pink-500/80 shadow-[0_0_16px_rgba(255,0,127,0.3)] scale-[1.01]'
               : 'bg-slate-900/40 border-white/5 opacity-70'
           }`}
         >
@@ -214,9 +218,18 @@ export const TopControls: React.FC<TopControlsProps> = ({
             <span className="w-7 h-7 rounded-lg bg-pink-500/20 border border-pink-400/50 flex items-center justify-center font-black text-pink-300 text-sm shadow-[0_0_8px_rgba(255,0,127,0.4)]">
               {mode === 'bot' ? <Bot size={15} /> : 'O'}
             </span>
-            <span className="font-mono text-xs font-semibold text-pink-200">
-              {score.O}
-            </span>
+            {/* Thinking indicator: three pulsing dots, icon-only */}
+            {mode === 'bot' && isBotThinking && isOTurn ? (
+              <div className="flex items-center gap-1 text-pink-400" title="Bot thinking">
+                <span className="w-1.5 h-1.5 rounded-full bg-pink-400 animate-bounce [animation-delay:0ms]" />
+                <span className="w-1.5 h-1.5 rounded-full bg-pink-400 animate-bounce [animation-delay:150ms]" />
+                <span className="w-1.5 h-1.5 rounded-full bg-pink-400 animate-bounce [animation-delay:300ms]" />
+              </div>
+            ) : (
+              <span className="font-mono text-xs font-semibold text-pink-200">
+                {score.O}
+              </span>
+            )}
           </div>
 
           {/* Mark Age Dots */}

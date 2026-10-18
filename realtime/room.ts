@@ -18,6 +18,8 @@ import {
   resetRoomForRematch,
   createInitialRoomSeats,
   getConfigForPlayers,
+  BOT_TIMING_CONFIG,
+  getBotThinkingDelay,
 } from '../src/lib/game';
 
 export function createUninitializedRoomState(roomCode: string): RoomState {
@@ -282,6 +284,7 @@ export class GameRoomHandler {
 
     if (this.getConnectedHumanCount() === 0) {
       this.lastActiveTimestamp = now;
+      this.cancelPendingBotMove();
     }
   }
 
@@ -657,7 +660,7 @@ export class GameRoomHandler {
         this.computeLobbyDerivedState();
         this.sendTo(connId, { type: 'state', state: this.state });
         this.broadcastState();
-        this.checkAndTriggerBotMove(now);
+        this.scheduleNextBotMove(now);
         return { success: true };
       }
 
@@ -892,10 +895,13 @@ export class GameRoomHandler {
     this.state.history = [];
     this.state.lastMoveCell = null;
     this.gameOverTimestamp = null;
+    this.cancelPendingBotMove();
     this.broadcastState();
 
-    // If starting player is bot, trigger bot move immediately
-    this.checkAndTriggerBotMove(now);
+    // If starting player is bot, schedule bot move
+    if (this.state.seats[this.state.turnSeatIndex]?.isBot) {
+      this.scheduleNextBotMove(now);
+    }
 
     return { success: true };
   }
@@ -927,11 +933,19 @@ export class GameRoomHandler {
     this.state = nextState;
     if (this.state.status === 'finished') {
       this.gameOverTimestamp = now;
+      this.cancelPendingBotMove();
+    } else {
+      const nextSeat = this.state.seats[this.state.turnSeatIndex];
+      if (nextSeat && !nextSeat.isBot) {
+        this.state.turnStartedAt = now;
+      }
     }
     this.broadcastState();
 
     // Check if next turn is bot
-    this.checkAndTriggerBotMove(now);
+    if (this.state.status === 'playing' && this.state.winner === null) {
+      this.scheduleNextBotMove(now);
+    }
 
     return { success: true };
   }
@@ -953,11 +967,14 @@ export class GameRoomHandler {
       }
     }
 
+    this.cancelPendingBotMove();
     this.state = resetRoomForRematch(this.state, now);
     this.gameOverTimestamp = null;
     this.broadcastState();
 
-    this.checkAndTriggerBotMove(now);
+    if (this.state.seats[this.state.turnSeatIndex]?.isBot) {
+      this.scheduleNextBotMove(now);
+    }
     return { success: true };
   }
 
@@ -990,7 +1007,7 @@ export class GameRoomHandler {
           }
 
           if (this.state.turnSeatIndex === seat.seatIndex) {
-            this.checkAndTriggerBotMove(now);
+            this.scheduleNextBotMove(now);
           }
         } else {
           // Waiting or Finished: deliberate leave frees the seat immediately
@@ -1020,6 +1037,7 @@ export class GameRoomHandler {
 
     if (this.getConnectedHumanCount() === 0) {
       this.lastActiveTimestamp = now;
+      this.cancelPendingBotMove();
     }
 
     return { success: true };
@@ -1084,14 +1102,17 @@ export class GameRoomHandler {
   public autoPlayMove(seatIndex: number, now: number = Date.now()): boolean {
     if (this.state.status !== 'playing' || this.state.turnSeatIndex !== seatIndex) return false;
 
+    this.cancelPendingBotMove();
+
     const available = getLegalMoves(this.state);
     if (available.length === 0) {
       this.state = advanceRoomTurn(this.state, now);
       if (this.state.status === 'finished') {
         this.gameOverTimestamp = now;
+        this.cancelPendingBotMove();
       }
       this.broadcastState();
-      this.checkAndTriggerBotMove(now);
+      this.scheduleNextBotMove(now);
       return true;
     }
 
@@ -1106,18 +1127,62 @@ export class GameRoomHandler {
       this.state = nextState;
       if (this.state.status === 'finished') {
         this.gameOverTimestamp = now;
+        this.cancelPendingBotMove();
+      } else {
+        const nextSeat = this.state.seats[this.state.turnSeatIndex];
+        if (nextSeat && !nextSeat.isBot) {
+          this.state.turnStartedAt = now;
+        }
       }
       this.broadcastState();
-      this.checkAndTriggerBotMove(now);
+      if (this.state.status === 'playing' && this.state.winner === null) {
+        this.scheduleNextBotMove(now);
+      }
       return true;
     }
     return false;
   }
 
-  private isProcessingBotMove = false;
+  private botTimer: ReturnType<typeof setTimeout> | null = null;
+  public scheduledBotSeat: number | null = null;
+  public scheduledBotTime: number | null = null;
 
-  private checkAndTriggerBotMove(now: number) {
-    if (this.state.status !== 'playing' || this.state.winner !== null) return;
+  public cancelPendingBotMove() {
+    if (this.botTimer) {
+      clearTimeout(this.botTimer);
+      this.botTimer = null;
+    }
+    this.scheduledBotSeat = null;
+    this.scheduledBotTime = null;
+  }
+
+  public scheduleNextBotMove(now: number = Date.now()) {
+    if (this.state.status !== 'playing' || this.state.winner !== null) {
+      this.cancelPendingBotMove();
+      return;
+    }
+
+    const hasConnectedHuman = this.state.seats.some((s) => !s.isBot && s.playerId !== null && s.isConnected);
+    if (!hasConnectedHuman) {
+      this.cancelPendingBotMove();
+      return;
+    }
+
+    const currentSeat = this.state.seats[this.state.turnSeatIndex];
+    if (!currentSeat || !currentSeat.isBot) {
+      this.cancelPendingBotMove();
+      return;
+    }
+
+    // At most one bot move can be scheduled at a time
+    if (this.botTimer && this.scheduledBotSeat === currentSeat.seatIndex) {
+      return;
+    }
+
+    if (this.botTimer) {
+      clearTimeout(this.botTimer);
+      this.botTimer = null;
+    }
 
     // Safety rule: if current player has no legal move for any reason, auto-skip their turn immediately
     const available = getLegalMoves(this.state);
@@ -1125,22 +1190,36 @@ export class GameRoomHandler {
       this.state = advanceRoomTurn(this.state, now);
       if (this.state.status === 'finished') {
         this.gameOverTimestamp = now;
+        this.cancelPendingBotMove();
       }
       this.broadcastState();
-      this.checkAndTriggerBotMove(now);
+      this.scheduleNextBotMove(now);
       return;
     }
 
-    const currentSeat = this.state.seats[this.state.turnSeatIndex];
-    if (currentSeat && currentSeat.isBot) {
-      if (this.isProcessingBotMove) return;
-      this.isProcessingBotMove = true;
-      setTimeout(() => {
-        this.isProcessingBotMove = false;
-        if (this.state.status === 'playing' && this.state.turnSeatIndex === currentSeat.seatIndex) {
-          this.autoPlayMove(currentSeat.seatIndex, Date.now());
-        }
-      }, 100);
+    const isFirstMove = (this.state.history?.length ?? 0) === 0;
+    const thinkingDelay = getBotThinkingDelay('medium', { isFirstMove });
+    const totalDelay = BOT_TIMING_CONFIG.animationDuration + thinkingDelay;
+
+    this.scheduledBotSeat = currentSeat.seatIndex;
+    this.scheduledBotTime = now + totalDelay;
+
+    this.botTimer = setTimeout(() => {
+      const execTime = this.scheduledBotTime || Date.now();
+      this.botTimer = null;
+      this.scheduledBotSeat = null;
+      this.scheduledBotTime = null;
+      if (
+        this.state.status === 'playing' &&
+        this.state.winner === null &&
+        this.state.turnSeatIndex === currentSeat.seatIndex
+      ) {
+        this.autoPlayMove(currentSeat.seatIndex, execTime);
+      }
+    }, totalDelay);
+
+    if (this.onScheduleAlarm) {
+      this.onScheduleAlarm(now + totalDelay);
     }
   }
 
@@ -1247,13 +1326,14 @@ export class GameRoomHandler {
     const currentSeat = this.state.seats[this.state.turnSeatIndex];
     if (!currentSeat) return;
 
-    // 5. Bot move if turn is on a bot
+    // 5. Bot move if turn is on a bot - NEVER move several bots in the same tick!
+    // The scheduler handles delays between moves. If un-scheduled, ensure it's scheduled.
     if (currentSeat.isBot) {
-      this.autoPlayMove(currentSeat.seatIndex, now);
+      this.scheduleNextBotMove(now);
       return;
     }
 
-    // 6. Check turn timer timeout (20s)
+    // 6. Check turn timer timeout (20s) for connected human player
     const turnElapsed = now - this.state.turnStartedAt;
     if (turnElapsed >= this.state.turnDurationMs) {
       this.autoPlayMove(currentSeat.seatIndex, now);
@@ -1367,6 +1447,7 @@ export class Main extends Server<Env> {
 
   public cleanupRoom() {
     this.devLog('Room expired, cleaning up');
+    this.handler.cancelPendingBotMove();
     if (this.tickInterval) {
       clearInterval(this.tickInterval);
       this.tickInterval = null;
