@@ -16,6 +16,8 @@ import { ToastNotification, ToastItem } from '@/components/ToastNotification';
 import { RoomDebugPanel } from '@/components/RoomDebugPanel';
 import { getBoardAtMove, getMoveInsights } from '@/lib/game';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { loadProgression, saveProgression, updateStats } from '@/lib/progress';
+import { BadgeToast, BadgeToastItem } from '@/components/BadgeToast';
 
 function RoomPageContent() {
   const params = useParams();
@@ -83,6 +85,7 @@ function RoomPageContent() {
     player: MarkSymbol;
     id: number;
   } | null>(null);
+  const [badgeToasts, setBadgeToasts] = useState<BadgeToastItem[]>([]);
 
   // Local Replay State (Multiplayer replay is strictly local)
   const [isReplay, setIsReplay] = useState(false);
@@ -312,6 +315,39 @@ function RoomPageContent() {
               turns: totalTurns,
               mode: isMatchmade ? 'matchmaking' : 'private',
             });
+
+            // Local Progression Update (stats & badges)
+            const activePlayerId = playerId || (typeof window !== 'undefined' ? getOrCreatePlayerId() : '');
+            const userSeat = nextState.seats.find((s) => s.playerId === activePlayerId);
+            if (userSeat) {
+              const won = nextState.winner === userSeat.symbol;
+              const modeKey = nextState.seatsCount === 3 ? '3P' : nextState.seatsCount === 4 ? '4P' : '2P';
+              const hasHumanOpponent = nextState.seats.some((s) => s.seatIndex !== userSeat.seatIndex && !s.isBot);
+              const oppType = hasHumanOpponent ? 'human' : 'Medium';
+
+              const currentProgression = loadProgression();
+              const updateRes = updateStats(currentProgression, {
+                mode: modeKey,
+                opponent: oppType,
+                won,
+                turns: totalTurns,
+                history: nextState.history,
+                playerSymbol: userSeat.symbol,
+                config: nextState.config,
+              });
+              saveProgression(updateRes.nextData);
+
+              for (const badgeId of updateRes.newBadges) {
+                track('badge_unlocked', { id: badgeId });
+                setBadgeToasts((t) => [...t, { id: `${badgeId}-${Date.now()}`, badgeId }]);
+              }
+              if (updateRes.rankUpTier) {
+                track('rank_up', { tier: updateRes.rankUpTier.toLowerCase() });
+              }
+              if (updateRes.newStreakReached) {
+                track('streak_reached', { n: updateRes.newStreakReached });
+              }
+            }
           }
 
           prevStateRef.current = nextState;
@@ -976,6 +1012,11 @@ function RoomPageContent() {
           </motion.div>
         )}
       </AnimatePresence>
+      {/* Badge Unlock Toasts */}
+      <BadgeToast
+        toasts={badgeToasts}
+        onDismiss={(id) => setBadgeToasts((prev) => prev.filter((t) => t.id !== id))}
+      />
       {/* Room Debug Panel (visible in development or with ?debug=1) */}
       <RoomDebugPanel roomState={roomState} myPlayerId={myPlayerId} isHost={isHost} lastStateTime={lastStateTime} />
     </main>

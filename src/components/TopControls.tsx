@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Bot, Users, Volume2, VolumeX, RotateCcw, Share2 } from 'lucide-react';
+import { Bot, Users, Volume2, VolumeX, RotateCcw, Share2, Award } from 'lucide-react';
 import { GameState } from '@/lib/game';
 
 import { useRouter } from 'next/navigation';
@@ -18,6 +18,8 @@ interface TopControlsProps {
   state: GameState;
   score: { X: number; O: number };
   streak: number;
+  onOpenProfile?: () => void;
+  rankTierColor?: string;
 }
 
 export const TopControls: React.FC<TopControlsProps> = ({
@@ -31,6 +33,8 @@ export const TopControls: React.FC<TopControlsProps> = ({
   state,
   score,
   streak,
+  onOpenProfile,
+  rankTierColor,
 }) => {
   const router = useRouter();
 
@@ -98,8 +102,24 @@ export const TopControls: React.FC<TopControlsProps> = ({
           </div>
         )}
 
-        {/* Action Buttons: Sound, Share/Invite, Restart */}
+        {/* Action Buttons: Profile, Sound, Share/Invite, Restart */}
         <div className="flex items-center gap-1">
+          {/* Profile / Stats Button */}
+          {onOpenProfile && (
+            <button
+              type="button"
+              id="top-profile-btn"
+              aria-label="Profile and Badges"
+              onClick={onOpenProfile}
+              className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl bg-slate-900/80 text-amber-400 hover:text-amber-300 border transition-all duration-200 cursor-pointer active:scale-95 shadow-sm"
+              style={{
+                borderColor: rankTierColor ? `${rankTierColor}40` : 'rgba(255,255,255,0.1)',
+              }}
+            >
+              <Award size={18} style={{ color: rankTierColor || '#eab308' }} />
+            </button>
+          )}
+
           {/* Sound Toggle */}
           <button
             type="button"

@@ -23,8 +23,21 @@ import { GameOverBanner, GameOverControls } from '@/components/GameOverExperienc
 import { FirstTimeHint } from '@/components/FirstTimeHint';
 import { SeoSection } from '@/components/SeoSection';
 import { MatchmakingModal, MatchFoundData } from '@/components/MatchmakingModal';
-import { Users, Share2, Activity, RotateCcw, Bot } from 'lucide-react';
+import { Users, Share2, Activity, RotateCcw, Bot, Award } from 'lucide-react';
 import { generateRoomCode } from '@/lib/types';
+import {
+  loadProgression,
+  saveProgression,
+  updateStats,
+  getRank,
+  checkNoVanishLoss,
+  normalizeOpponentType,
+  createInitialProgression,
+  ProgressionData,
+} from '@/lib/progress';
+import { ProfileModal } from '@/components/ProfileModal';
+import { RankDeltaIndicator } from '@/components/RankDeltaIndicator';
+import { BadgeToast, BadgeToastItem } from '@/components/BadgeToast';
 
 function HomeContent() {
   const router = useRouter();
@@ -37,6 +50,16 @@ function HomeContent() {
   const [score, setScore] = useState<{ X: number; O: number }>({ X: 0, O: 0 });
   const [streak, setStreak] = useState<number>(0);
   const [lastWinner, setLastWinner] = useState<Player | null>(null);
+
+  // Progression & Stats State
+  const [progression, setProgression] = useState<ProgressionData>(() =>
+    typeof window !== 'undefined' ? loadProgression() : createInitialProgression()
+  );
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [lastRankDelta, setLastRankDelta] = useState<number | null>(null);
+  const [badgeToasts, setBadgeToasts] = useState<BadgeToastItem[]>([]);
+
+  const currentRankInfo = useMemo(() => getRank(progression.rankPoints), [progression.rankPoints]);
 
   const [vanishedAnim, setVanishedAnim] = useState<{
     cell: number;
@@ -293,6 +316,7 @@ function HomeContent() {
     }
     setIsReplay(false);
     setVanishedAnim(null);
+    setLastRankDelta(null);
     setGameState(createInitialState('X'));
   }, [gameState.winner]);
 
@@ -302,6 +326,7 @@ function HomeContent() {
     setScore({ X: 0, O: 0 });
     setStreak(0);
     setLastWinner(null);
+    setLastRankDelta(null);
     handleRestart();
   };
 
@@ -309,6 +334,52 @@ function HomeContent() {
   const handleDifficultyChange = (diff: 'easy' | 'medium' | 'hard') => {
     setBotDifficulty(diff);
   };
+
+  // Record progression completion
+  const recordGameCompletion = useCallback(
+    (finalState: GameState, winner: Player) => {
+      const humanWon = winner === 'X';
+      const oppType = mode === 'bot' ? normalizeOpponentType(botDifficulty) : 'human';
+      const isFlawless =
+        mode === 'bot' && botDifficulty === 'hard' && humanWon
+          ? checkNoVanishLoss(finalState.history, 'X', finalState.config)
+          : undefined;
+
+      setProgression((prev) => {
+        const res = updateStats(prev, {
+          mode: '2P',
+          opponent: oppType,
+          won: humanWon,
+          turns: finalState.moveCount,
+          history: finalState.history,
+          playerSymbol: 'X',
+          config: finalState.config,
+          flawlessVanish: isFlawless,
+        });
+
+        saveProgression(res.nextData);
+
+        if (mode === 'bot') {
+          setLastRankDelta(res.rankDelta);
+        }
+
+        // Analytics tracking
+        for (const badgeId of res.newBadges) {
+          track('badge_unlocked', { id: badgeId });
+          setBadgeToasts((t) => [...t, { id: `${badgeId}-${Date.now()}`, badgeId }]);
+        }
+        if (res.rankUpTier) {
+          track('rank_up', { tier: res.rankUpTier.toLowerCase() });
+        }
+        if (res.newStreakReached) {
+          track('streak_reached', { n: res.newStreakReached });
+        }
+
+        return res.nextData;
+      });
+    },
+    [mode, botDifficulty]
+  );
 
   // Process a move
   const executeMove = useCallback((cellIndex: number) => {
@@ -350,11 +421,13 @@ function HomeContent() {
         }));
         setStreak((prev) => (lastWinner === winner ? prev + 1 : 1));
         setLastWinner(winner);
+
+        recordGameCompletion(nextState, winner);
       }
 
       return nextState;
     });
-  }, [lastWinner, mode]);
+  }, [lastWinner, mode, recordGameCompletion]);
 
   // Handle cell click by human player
   const handleCellClick = (index: number) => {
@@ -411,6 +484,8 @@ function HomeContent() {
               }));
               setStreak((prev) => (lastWinner === winner ? prev + 1 : 1));
               setLastWinner(winner);
+
+              recordGameCompletion(nextState, winner);
             }
 
             return nextState;
@@ -426,7 +501,7 @@ function HomeContent() {
         clearTimeout(botTimerRef.current);
       }
     };
-  }, [mode, gameState.turn, gameState.winner, botDifficulty, lastWinner]);
+  }, [mode, gameState.turn, gameState.winner, botDifficulty, lastWinner, recordGameCompletion]);
 
   return (
     <main className="min-h-screen w-full flex flex-col items-center justify-between px-3 py-4 sm:py-6 overflow-x-hidden">
@@ -435,11 +510,26 @@ function HomeContent() {
 
       {/* Main Game Screen */}
       <div className="w-full max-w-md flex flex-col items-center gap-3 sm:gap-4 my-auto">
-        {/* Minimalist Logo / Title + Online Quick Match */}
+        {/* Minimalist Logo / Title + Profile Icon + Online Quick Match */}
         <header className="w-full max-w-[360px] flex items-center justify-between px-1 select-none">
-          <h1 className="text-xl sm:text-2xl font-black tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-white to-pink-500 drop-shadow-[0_0_10px_rgba(0,240,255,0.4)]">
-            VANISH XO
-          </h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl sm:text-2xl font-black tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-white to-pink-500 drop-shadow-[0_0_10px_rgba(0,240,255,0.4)]">
+              VANISH XO
+            </h1>
+            <button
+              type="button"
+              id="header-profile-btn"
+              aria-label="Profile and Badges"
+              onClick={() => setIsProfileOpen(true)}
+              className="w-7 h-7 rounded-xl bg-slate-900/90 border flex items-center justify-center transition-all hover:scale-105 active:scale-95 cursor-pointer shadow-sm"
+              style={{
+                borderColor: `${currentRankInfo.color}66`,
+                boxShadow: `0 0 10px ${currentRankInfo.glow}`,
+              }}
+            >
+              <Award size={14} style={{ color: currentRankInfo.color }} />
+            </button>
+          </div>
           <div className="flex items-center gap-1 bg-slate-900/80 p-0.5 rounded-xl border border-white/10 backdrop-blur-md">
             {([2, 3, 4] as const).map((count) => (
               <button
@@ -484,6 +574,8 @@ function HomeContent() {
             state={gameState}
             score={score}
             streak={streak}
+            onOpenProfile={() => setIsProfileOpen(true)}
+            rankTierColor={currentRankInfo.color}
           />
         )}
 
@@ -508,6 +600,14 @@ function HomeContent() {
           isReplay={isReplay}
           isGameOver={gameState.winner !== null}
         />
+
+        {/* Rank Change Animated Delta under the board */}
+        {gameState.winner !== null && lastRankDelta !== null && (
+          <RankDeltaIndicator
+            delta={lastRankDelta}
+            tierColor={currentRankInfo.color}
+          />
+        )}
 
         {/* Game Over Controls (BELOW the board: Again, Replay, Home OR step controls) */}
         {gameState.winner !== null ? (
@@ -634,6 +734,19 @@ function HomeContent() {
           onCountdownComplete={handleCountdownComplete}
         />
       )}
+
+      {/* Profile & Local Progression Modal */}
+      <ProfileModal
+        isOpen={isProfileOpen}
+        onClose={() => setIsProfileOpen(false)}
+        data={progression}
+      />
+
+      {/* Badge Unlock Toasts */}
+      <BadgeToast
+        toasts={badgeToasts}
+        onDismiss={(id) => setBadgeToasts((prev) => prev.filter((t) => t.id !== id))}
+      />
 
       {/* Below the Fold SEO Content for Google Search */}
       <SeoSection />
