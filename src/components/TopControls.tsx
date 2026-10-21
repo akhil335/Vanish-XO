@@ -1,8 +1,9 @@
 'use client';
 
-import React from 'react';
-import { Bot, Users, Volume2, VolumeX, RotateCcw, Share2, Award } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Bot, Users, Volume2, VolumeX, RotateCcw, Share2, Award, Edit2 } from 'lucide-react';
 import { GameState } from '@/lib/game';
+import { getPlayerName, setPlayerName } from '@/lib/player';
 
 import { useRouter } from 'next/navigation';
 import { generateRoomCode } from '@/lib/types';
@@ -39,6 +40,13 @@ export const TopControls: React.FC<TopControlsProps> = ({
   isBotThinking = false,
 }) => {
   const router = useRouter();
+  const [playerName, setPlayerNameState] = useState<string | null>(null);
+  const [isNameModalOpen, setIsNameModalOpen] = useState(false);
+  const [tempName, setTempName] = useState('');
+
+  useEffect(() => {
+    setPlayerNameState(getPlayerName());
+  }, []);
 
   const handleInvite = async () => {
     if (typeof window === 'undefined') return;
@@ -173,13 +181,32 @@ export const TopControls: React.FC<TopControlsProps> = ({
               : 'bg-slate-900/40 border-white/5 opacity-70'
           }`}
         >
-          <div className="flex items-center gap-2">
-            <span className="w-7 h-7 rounded-lg bg-cyan-500/20 border border-cyan-400/50 flex items-center justify-center font-black text-cyan-300 text-sm shadow-[0_0_8px_rgba(0,240,255,0.4)]">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="w-7 h-7 shrink-0 rounded-lg bg-cyan-500/20 border border-cyan-400/50 flex items-center justify-center font-black text-cyan-300 text-sm shadow-[0_0_8px_rgba(0,240,255,0.4)]">
               X
             </span>
-            <span className="font-mono text-xs font-semibold text-cyan-200">
-              {score.X}
-            </span>
+            <div className="flex flex-col min-w-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setTempName(playerName || '');
+                  setIsNameModalOpen(true);
+                }}
+                className="text-left text-[11px] font-bold text-cyan-200 hover:text-white truncate max-w-[75px] cursor-pointer leading-tight flex items-center gap-1 group"
+                title={playerName ? `Player: ${playerName} (Click to edit)` : 'Set your name'}
+              >
+                <span className="truncate">{playerName || 'Set Name'}</span>
+                {!playerName && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping shrink-0" />
+                )}
+                {playerName && (
+                  <Edit2 size={9} className="opacity-0 group-hover:opacity-75 transition-opacity shrink-0" />
+                )}
+              </button>
+              <span className="font-mono text-[10px] font-semibold text-cyan-400/80 leading-none">
+                {score.X}
+              </span>
+            </div>
           </div>
 
           {/* Mark Age Dots (Shows active marks out of 3) */}
@@ -260,6 +287,63 @@ export const TopControls: React.FC<TopControlsProps> = ({
         <div className="flex items-center justify-center gap-1.5 py-0.5 text-xs font-bold text-amber-400">
           <span>🔥</span>
           <span className="font-mono">{streak}</span>
+        </div>
+      )}
+
+      {/* Set / Change Player Name Modal */}
+      {isNameModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm select-auto">
+          <div className="w-full max-w-xs bg-slate-900 border border-cyan-500/30 rounded-2xl p-5 shadow-2xl flex flex-col gap-3">
+            <h3 className="text-sm font-black uppercase tracking-wider text-cyan-300">
+              {playerName ? 'Edit Player Name' : 'Set Player Name'}
+            </h3>
+            <p className="text-xs text-slate-400">
+              This name will be displayed in games and on the global leaderboard.
+            </p>
+            <input
+              type="text"
+              maxLength={20}
+              value={tempName}
+              onChange={(e) => setTempName(e.target.value)}
+              placeholder="Enter player name"
+              autoFocus
+              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-white/10 text-white text-sm focus:border-cyan-400 focus:outline-none"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && tempName.trim()) {
+                  const clean = tempName.trim();
+                  setPlayerName(clean);
+                  setPlayerNameState(clean);
+                  setIsNameModalOpen(false);
+                } else if (e.key === 'Escape') {
+                  setIsNameModalOpen(false);
+                }
+              }}
+            />
+            <div className="flex justify-end gap-2 mt-1">
+              <button
+                type="button"
+                onClick={() => setIsNameModalOpen(false)}
+                className="px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const clean = tempName.trim();
+                  if (clean) {
+                    setPlayerName(clean);
+                    setPlayerNameState(clean);
+                    setIsNameModalOpen(false);
+                  }
+                }}
+                disabled={!tempName.trim()}
+                className="px-4 py-1.5 rounded-xl text-xs font-black bg-cyan-400 text-black hover:bg-cyan-300 disabled:opacity-50 transition-all cursor-pointer shadow-md"
+              >
+                Save
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

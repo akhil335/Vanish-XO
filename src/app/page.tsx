@@ -14,8 +14,9 @@ import {
 } from '@/lib/game';
 import { soundManager, triggerHaptic } from '@/lib/audio';
 import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import PartySocket from 'partysocket';
-import { getOrCreatePlayerId } from '@/lib/player';
+import { getOrCreatePlayerId, getPlayerName } from '@/lib/player';
 import { getRealtimeConfig } from '@/lib/config';
 import { track } from '@/lib/analytics';
 import { LobbyServerMessage, MarkSymbol } from '@/lib/types';
@@ -25,7 +26,7 @@ import { GameOverBanner, GameOverControls } from '@/components/GameOverExperienc
 import { FirstTimeHint } from '@/components/FirstTimeHint';
 import { SeoSection } from '@/components/SeoSection';
 import { MatchmakingModal, MatchFoundData } from '@/components/MatchmakingModal';
-import { Users, Share2, Activity, RotateCcw, Bot, Award } from 'lucide-react';
+import { Users, Share2, Activity, RotateCcw, Bot, Award, Trophy } from 'lucide-react';
 import { generateRoomCode } from '@/lib/types';
 import {
   loadProgression,
@@ -402,6 +403,23 @@ function HomeContent() {
           track('streak_reached', { n: res.newStreakReached });
         }
 
+        // Record global Elo game result
+        try {
+          const playerId = getOrCreatePlayerId();
+          const playerName = getPlayerName() || undefined;
+          const oppType = mode === 'bot' ? `bot-${botDifficulty}` : 'human';
+          fetch('/api/leaderboard/record', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              playerId,
+              playerName,
+              opponentId: oppType,
+              result: humanWon ? 'win' : 'loss',
+            }),
+          }).catch(() => {});
+        } catch {}
+
         return res.nextData;
       });
     },
@@ -512,13 +530,8 @@ function HomeContent() {
     const plannedBotMove = getBotMove(gameState, botDifficulty);
     if (plannedBotMove === -1) return;
 
-    // 2. Compute delay:
-    // (a) Previous move's placement & vanish animations finish (~520ms if vanish, ~260ms otherwise)
-    const animWait = gameState.lastVanished ? BOT_TIMING_CONFIG.animationDuration : 260;
-    // (b) Random thinking delay according to difficulty + jitter + first-move bonus
-    const isFirstMove = gameState.moveCount <= 1;
-    const thinkingDelay = getBotThinkingDelay(botDifficulty, { isFirstMove });
-    const totalDelay = animWait + thinkingDelay;
+    // 2. Compute delay: random time between 0.5 and 1 second
+    const totalDelay = 500 + Math.random() * 500;
 
     botTimerRef.current = setTimeout(() => {
       botTimerRef.current = null;
@@ -603,6 +616,14 @@ function HomeContent() {
             >
               <Award size={14} style={{ color: currentRankInfo.color }} />
             </button>
+            <Link
+              href="/leaderboard"
+              id="header-leaderboard-btn"
+              aria-label="Global Leaderboard"
+              className="w-7 h-7 rounded-xl bg-slate-900/90 border border-amber-500/40 text-amber-400 hover:text-amber-300 flex items-center justify-center transition-all hover:scale-105 active:scale-95 cursor-pointer shadow-[0_0_10px_rgba(245,158,11,0.2)]"
+            >
+              <Trophy size={14} />
+            </Link>
           </div>
           <div className="flex items-center gap-1 bg-slate-900/80 p-0.5 rounded-xl border border-white/10 backdrop-blur-md">
             {([2, 3, 4] as const).map((count) => (

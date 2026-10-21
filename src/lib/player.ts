@@ -13,3 +13,23 @@ export function getOrCreatePlayerId(): string {
 }
 
 export { getRealtimeHost } from './config';
+
+export function getPlayerName(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const name = localStorage.getItem('vanish_xo_player_name');
+    return name && name.trim() ? name.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setPlayerName(name: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const trimmed = name.trim();
+    if (trimmed) {
+      localStorage.setItem('vanish_xo_player_name', trimmed);
+    }
+  } catch {}
+}
