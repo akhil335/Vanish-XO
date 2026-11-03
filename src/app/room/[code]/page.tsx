@@ -185,6 +185,31 @@ function RoomPageContent() {
     }, 2500);
   }, []);
 
+  const sessionRef = useRef(session);
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
+
+  const addToastRef = useRef(addToast);
+  useEffect(() => {
+    addToastRef.current = addToast;
+  }, [addToast]);
+
+  const matchConfigRef = useRef(matchConfig);
+  useEffect(() => {
+    matchConfigRef.current = matchConfig;
+  }, [matchConfig]);
+
+  const matchTokenRef = useRef(matchToken);
+  useEffect(() => {
+    matchTokenRef.current = matchToken;
+  }, [matchToken]);
+
+  const isMatchmadeRef = useRef(isMatchmade);
+  useEffect(() => {
+    isMatchmadeRef.current = isMatchmade;
+  }, [isMatchmade]);
+
   // PartySocket Connection
   useEffect(() => {
     if (!playerId) return;
@@ -232,12 +257,12 @@ function RoomPageContent() {
         clearTimeout(reconnectTimeoutRef.current);
         reconnectTimeoutRef.current = null;
       }
-      const currentName = getPlayerName(session?.user);
-      const currentUserId = session?.user?.id || undefined;
+      const currentName = getPlayerName(sessionRef.current?.user);
+      const currentUserId = sessionRef.current?.user?.id || undefined;
       if (isCreateRef.current) {
         socket.send(JSON.stringify({ type: 'create', playerId, playerName: currentName, name: currentName, userId: currentUserId }));
       } else {
-        socket.send(JSON.stringify({ type: 'join', playerId, playerName: currentName, name: currentName, userId: currentUserId, matchConfig, matchToken }));
+        socket.send(JSON.stringify({ type: 'join', playerId, playerName: currentName, name: currentName, userId: currentUserId, matchConfig: matchConfigRef.current, matchToken: matchTokenRef.current }));
       }
     });
 
@@ -298,7 +323,7 @@ function RoomPageContent() {
             track('game_started', {
               players: nextState.seatsCount,
               bots: nextState.seats.filter((s) => s.isBot).length,
-              mode: isMatchmade ? 'matchmaking' : 'private',
+              mode: isMatchmadeRef.current ? 'matchmaking' : 'private',
             });
           }
 
@@ -341,7 +366,7 @@ function RoomPageContent() {
               players: nextState.seatsCount,
               bots: nextState.seats.filter((s) => s.isBot).length,
               turns: totalTurns,
-              mode: isMatchmade ? 'matchmaking' : 'private',
+              mode: isMatchmadeRef.current ? 'matchmaking' : 'private',
               ...(durationSeconds !== undefined ? { duration_seconds: durationSeconds } : {}),
             });
 
@@ -391,15 +416,15 @@ function RoomPageContent() {
               .then((res) => res.json() as Promise<{ rated?: boolean; alreadyRecorded?: boolean; winner?: { name?: string; delta?: number }; message?: string }>)
               .then((data) => {
                 if (data.rated && !data.alreadyRecorded) {
-                  addToast({
+                  addToastRef.current({
                     type: 'message',
                     message: `Ranked result recorded! ${data.winner?.name || 'Winner'} won (+${data.winner?.delta ?? 0})`,
                   });
                   if (typeof window !== 'undefined') {
                     window.dispatchEvent(new Event('vanish_xo_leaderboard_updated'));
                   }
-                } else if (!data.rated && data.message && session?.user?.id) {
-                  addToast({
+                } else if (!data.rated && data.message && sessionRef.current?.user?.id) {
+                  addToastRef.current({
                     type: 'message',
                     message: data.message,
                   });
@@ -407,8 +432,8 @@ function RoomPageContent() {
               })
               .catch((err) => {
                 console.error('[room:record] Failed to record ranked match result:', err);
-                if (session?.user?.id) {
-                  addToast({
+                if (sessionRef.current?.user?.id) {
+                  addToastRef.current({
                     type: 'message',
                     message: 'Unable to record ranked result.',
                   });
@@ -417,27 +442,27 @@ function RoomPageContent() {
           }
 
           if (nextState.rematchDeclined && !prev?.rematchDeclined) {
-            addToast({ type: 'message', message: 'Rematch declined or timed out' });
+            addToastRef.current({ type: 'message', message: 'Rematch declined or timed out' });
           }
 
           prevStateRef.current = nextState;
           setRoomState(nextState);
         } else if (msg.type === 'player_joined') {
-          addToast({ type: 'player_joined', seatIndex: msg.seatIndex, isBot: msg.isBot });
+          addToastRef.current({ type: 'player_joined', seatIndex: msg.seatIndex, isBot: msg.isBot });
         } else if (msg.type === 'player_left') {
-          addToast({ type: 'player_left', seatIndex: msg.seatIndex });
+          addToastRef.current({ type: 'player_left', seatIndex: msg.seatIndex });
         } else if (msg.type === 'host_changed') {
-          addToast({ type: 'host_changed', seatIndex: msg.seatIndex, newHostPlayerId: msg.newHostPlayerId });
+          addToastRef.current({ type: 'host_changed', seatIndex: msg.seatIndex, newHostPlayerId: msg.newHostPlayerId });
         } else if (msg.type === 'reaction') {
           soundManager.playReaction();
           setLiveReactions((prev) => [...prev.slice(-9), msg]);
         } else if (msg.type === 'error') {
           if (msg.code === 'REMATCH_TIMEOUT') {
-            addToast({ type: 'message', message: 'Rematch request timed out' });
+            addToastRef.current({ type: 'message', message: 'Rematch request timed out' });
             return;
           }
           if (msg.code === 'OPPONENT_NOT_AVAILABLE') {
-            addToast({ type: 'message', message: msg.message || 'Opponent is not available for a rematch' });
+            addToastRef.current({ type: 'message', message: msg.message || 'Opponent is not available for a rematch' });
             return;
           }
           if (msg.code === 'ROOM_NOT_FOUND') {
@@ -488,7 +513,7 @@ function RoomPageContent() {
       socket.close();
       socketRef.current = null;
     };
-  }, [playerId, roomCode, matchConfig, matchToken, addToast, isMatchmade, retryKey, session?.user]);
+  }, [playerId, roomCode, retryKey]);
 
   // Detect seat count changes in lobby and display toast
   useEffect(() => {
