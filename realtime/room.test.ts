@@ -1459,6 +1459,99 @@ describe('Lobby Sync and Host Ownership Bug Fixes (Required Scenarios)', () => {
       expect(handler.state.history?.length).toBe(movesBefore);
     });
   });
+
+  describe('Emoji Reactions & Quick Messages', () => {
+    let handler: GameRoomHandler;
+    let client1Messages: ServerMessage[];
+    let client2Messages: ServerMessage[];
+
+    const sendC1 = (m: string) => {
+      client1Messages.push(JSON.parse(m));
+    };
+    const sendC2 = (m: string) => {
+      client2Messages.push(JSON.parse(m));
+    };
+
+    beforeEach(() => {
+      handler = new GameRoomHandler('REACTION_TEST');
+      client1Messages = [];
+      client2Messages = [];
+      handler.handleConnection('conn1', sendC1);
+      handler.handleConnection('conn2', sendC2);
+      handler.handleMessage('conn1', JSON.stringify({ type: 'create', playerId: 'player1', playerName: 'Alice' }));
+      handler.handleMessage('conn2', JSON.stringify({ type: 'join', playerId: 'player2', playerName: 'Bob' }));
+    });
+
+    it('broadcasts emoji reactions to all connected clients', () => {
+      client1Messages = [];
+      client2Messages = [];
+
+      const res = handler.handleMessage(
+        'conn1',
+        JSON.stringify({ type: 'reaction', emoji: '🔥' }),
+        1000
+      );
+      expect(res.success).toBe(true);
+
+      const reactionMsg1 = client1Messages.find((m) => m.type === 'reaction');
+      const reactionMsg2 = client2Messages.find((m) => m.type === 'reaction');
+
+      expect(reactionMsg1).toBeDefined();
+      expect(reactionMsg2).toBeDefined();
+      if (reactionMsg2 && reactionMsg2.type === 'reaction') {
+        expect(reactionMsg2.emoji).toBe('🔥');
+        expect(reactionMsg2.seatIndex).toBe(0);
+        expect(reactionMsg2.symbol).toBe('X');
+        expect(reactionMsg2.playerName).toBe('Alice');
+      }
+    });
+
+    it('broadcasts quick messages to all connected clients', () => {
+      client2Messages = [];
+
+      const res = handler.handleMessage(
+        'conn2',
+        JSON.stringify({ type: 'reaction', quickMessage: '🔥 Nice move!' }),
+        2000
+      );
+      expect(res.success).toBe(true);
+
+      const reactionMsg = client2Messages.find((m) => m.type === 'reaction');
+      expect(reactionMsg).toBeDefined();
+      if (reactionMsg && reactionMsg.type === 'reaction') {
+        expect(reactionMsg.quickMessage).toBe('🔥 Nice move!');
+        expect(reactionMsg.seatIndex).toBe(1);
+        expect(reactionMsg.symbol).toBe('O');
+        expect(reactionMsg.playerName).toBe('Bob');
+      }
+    });
+
+    it('enforces reaction cooldown', () => {
+      const res1 = handler.handleMessage(
+        'conn1',
+        JSON.stringify({ type: 'reaction', emoji: '😂' }),
+        5000
+      );
+      expect(res1.success).toBe(true);
+
+      // Sent 200ms later (within 800ms cooldown)
+      const res2 = handler.handleMessage(
+        'conn1',
+        JSON.stringify({ type: 'reaction', emoji: '😎' }),
+        5200
+      );
+      expect(res2.success).toBe(false);
+      expect(res2.error).toBe('COOLDOWN');
+
+      // Sent 900ms later (after cooldown)
+      const res3 = handler.handleMessage(
+        'conn1',
+        JSON.stringify({ type: 'reaction', emoji: '😎' }),
+        5900
+      );
+      expect(res3.success).toBe(true);
+    });
+  });
 });
 
 

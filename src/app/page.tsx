@@ -17,10 +17,11 @@ import PartySocket from 'partysocket';
 import { getOrCreatePlayerId, getPlayerName } from '@/lib/player';
 import { getRealtimeConfig } from '@/lib/config';
 import { track, trackFirstMove } from '@/lib/analytics';
-import { LobbyServerMessage, MarkSymbol } from '@/lib/types';
+import { LobbyServerMessage, MarkSymbol, LiveReaction } from '@/lib/types';
 import { GameBoard } from '@/components/GameBoard';
 import { TopControls } from '@/components/TopControls';
 import { GameOverBanner, GameOverControls } from '@/components/GameOverExperience';
+import { MatchChat } from '@/components/MatchChat';
 import { FirstTimeHint, isTutorialCompleted, markTutorialCompleted } from '@/components/FirstTimeHint';
 import { SeoSection } from '@/components/SeoSection';
 import { MatchmakingModal, MatchFoundData } from '@/components/MatchmakingModal';
@@ -140,6 +141,7 @@ function HomeContent() {
     id: number;
   } | null>(null);
 
+  const [liveReactions, setLiveReactions] = useState<LiveReaction[]>([]);
   const botTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Matchmaking State
@@ -568,6 +570,66 @@ function HomeContent() {
     [mode, botDifficulty, session]
   );
 
+  const triggerBotReaction = useCallback((reaction: { emoji?: string; quickMessage?: string }) => {
+    const botReaction: LiveReaction = {
+      id: `rx_bot_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      seatIndex: 1,
+      symbol: 'O',
+      playerName: `Bot (${botDifficulty})`,
+      emoji: reaction.emoji,
+      quickMessage: reaction.quickMessage,
+      timestamp: Date.now(),
+    };
+    soundManager.playReaction();
+    setLiveReactions((prev) => [...prev.slice(-9), botReaction]);
+  }, [botDifficulty]);
+
+  const handleSendReaction = useCallback((reaction: { emoji?: string; quickMessage?: string }) => {
+    const isPlayerTurn = gameState.turn === 'X';
+    const playerSymbol: MarkSymbol = mode === 'pvp' ? (isPlayerTurn ? 'X' : 'O') : 'X';
+    const playerReaction: LiveReaction = {
+      id: `rx_local_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      seatIndex: playerSymbol === 'X' ? 0 : 1,
+      symbol: playerSymbol,
+      playerName: mode === 'pvp' ? `Player ${playerSymbol}` : (session?.user?.name || 'You'),
+      emoji: reaction.emoji,
+      quickMessage: reaction.quickMessage,
+      timestamp: Date.now(),
+    };
+    setLiveReactions((prev) => [...prev.slice(-9), playerReaction]);
+
+    if (mode === 'bot') {
+      const delay = 600 + Math.random() * 600;
+      setTimeout(() => {
+        if (reaction.quickMessage === '👋 Hello!') {
+          triggerBotReaction({ quickMessage: "😎 Let's go!" });
+        } else if (reaction.quickMessage === '🔥 Nice move!') {
+          triggerBotReaction({ quickMessage: '👏 Well played!' });
+        } else if (reaction.quickMessage === '🤝 Good game!') {
+          triggerBotReaction({ quickMessage: '🤝 Good game!' });
+        } else if (reaction.quickMessage === '🏆 I won!') {
+          triggerBotReaction({ emoji: '😭' });
+        } else if (reaction.quickMessage === '😈 Your turn!') {
+          triggerBotReaction({ emoji: '😈' });
+        } else if (reaction.quickMessage === '😭 So close!') {
+          triggerBotReaction({ emoji: '😂' });
+        } else if (reaction.emoji === '❤️') {
+          triggerBotReaction({ emoji: '❤️' });
+        } else if (reaction.emoji === '🔥') {
+          triggerBotReaction({ emoji: '🔥' });
+        } else if (reaction.emoji === '💀' || reaction.emoji === '😭') {
+          triggerBotReaction({ emoji: '😈' });
+        } else if (reaction.emoji === '👏') {
+          triggerBotReaction({ quickMessage: '🤝 Good game!' });
+        } else {
+          const botEmojis = ['😎', '🔥', '👏', '😈', '😂'] as const;
+          const chosen = botEmojis[Math.floor(Math.random() * botEmojis.length)];
+          triggerBotReaction({ emoji: chosen });
+        }
+      }, delay);
+    }
+  }, [gameState.turn, mode, session?.user?.name, triggerBotReaction]);
+
   // Process a move
   const executeMove = useCallback((cellIndex: number) => {
     setGameState((prevState) => {
@@ -624,6 +686,12 @@ function HomeContent() {
         setLastWinner(winner);
 
         recordGameCompletion(nextState, winner);
+
+        if (mode === 'bot' && winner === 'X') {
+          setTimeout(() => {
+            triggerBotReaction(Math.random() > 0.5 ? { quickMessage: '👏 Well played!' } : { emoji: '🤯' });
+          }, 700);
+        }
       }
 
       // Wait for animations to complete before unlocking human input
@@ -635,7 +703,7 @@ function HomeContent() {
 
       return nextState;
     });
-  }, [lastWinner, mode, recordGameCompletion]);
+  }, [lastWinner, mode, recordGameCompletion, triggerBotReaction]);
 
   // Handle cell click by human player
   const handleCellClick = (index: number) => {
@@ -733,6 +801,12 @@ function HomeContent() {
             setLastWinner(winner);
 
             recordGameCompletion(nextState, winner);
+
+            if (winner === 'O') {
+              setTimeout(() => {
+                triggerBotReaction(Math.random() > 0.5 ? { quickMessage: '🏆 I won!' } : { emoji: '😈' });
+              }, 700);
+            }
           }
 
           return nextState;
@@ -755,6 +829,7 @@ function HomeContent() {
     lastWinner,
     recordGameCompletion,
     cancelBotScheduler,
+    triggerBotReaction,
   ]);
 
   return (
@@ -884,6 +959,14 @@ function HomeContent() {
             isReplay={isReplay}
             isGameOver={gameState.winner !== null}
             tutorialStep={isTutorialOpen ? tutorialStep : null}
+          />
+
+          {/* Match Emoji Reactions & Quick Messages Bar */}
+          <MatchChat
+            reactions={liveReactions}
+            onSendReaction={handleSendReaction}
+            onDismissReaction={(id) => setLiveReactions((prev) => prev.filter((r) => r.id !== id))}
+            className="mt-3 mb-1"
           />
 
           {/* Rank Change Animated Delta under the board */}

@@ -155,6 +155,11 @@ export const ClientMessageSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('ping'),
   }),
+  z.object({
+    type: z.literal('reaction'),
+    emoji: z.string().max(16).optional(),
+    quickMessage: z.string().max(64).optional(),
+  }),
 ]);
 
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
@@ -165,7 +170,55 @@ export type ServerMessage =
   | { type: 'error'; code: string; message?: string; blockReasons?: string[] }
   | { type: 'player_joined'; seatIndex: number; isBot: boolean }
   | { type: 'player_left'; seatIndex: number }
-  | { type: 'host_changed'; newHostPlayerId: string; seatIndex: number };
+  | { type: 'host_changed'; newHostPlayerId: string; seatIndex: number }
+  | {
+      type: 'reaction';
+      id: string;
+      seatIndex: number;
+      symbol: MarkSymbol;
+      playerName: string;
+      emoji?: string;
+      quickMessage?: string;
+      timestamp: number;
+    };
+
+export const EMOJI_REACTIONS = [
+  '😂',
+  '😎',
+  '🔥',
+  '😭',
+  '🤯',
+  '👏',
+  '❤️',
+  '😈',
+  '😱',
+  '💀',
+] as const;
+export type EmojiReaction = (typeof EMOJI_REACTIONS)[number];
+
+export const QUICK_MESSAGES = [
+  '👋 Hello!',
+  '😂 Haha!',
+  '🔥 Nice move!',
+  "😎 Let's go!",
+  '😭 So close!',
+  '👏 Well played!',
+  '🤝 Good game!',
+  '🏆 I won!',
+  '😈 Your turn!',
+  '😱 What a move!',
+] as const;
+export type QuickMessage = (typeof QUICK_MESSAGES)[number];
+
+export interface LiveReaction {
+  id: string;
+  seatIndex: number;
+  symbol: MarkSymbol;
+  playerName: string;
+  emoji?: string;
+  quickMessage?: string;
+  timestamp: number;
+}
 
 // Matchmaking Lobby Messages (Client -> Server)
 export const LobbyClientMessageSchema = z.discriminatedUnion('type', [

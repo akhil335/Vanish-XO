@@ -4,7 +4,7 @@ import React, { useEffect, useState, useRef, useCallback, Suspense, useMemo } fr
 import PartySocket from 'partysocket';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, Share2, Play, Check, Users, Eye, DoorOpen, X, DoorClosed, HelpCircle, AlertTriangle, Home, Activity, RotateCcw, Bot } from 'lucide-react';
-import { RoomState, ServerMessage, MarkSymbol, MatchConfig, isValidRoomCode, generateRoomCode } from '@/lib/types';
+import { RoomState, ServerMessage, MarkSymbol, MatchConfig, isValidRoomCode, generateRoomCode, LiveReaction } from '@/lib/types';
 import { getRealtimeConfig, getSiteUrl } from '@/lib/config';
 import { track, trackFirstMove } from '@/lib/analytics';
 import { soundManager, triggerHaptic } from '@/lib/audio';
@@ -13,6 +13,7 @@ import { OnlinePlayerBar } from '@/components/OnlinePlayerBar';
 import { GameOverBanner, GameOverControls } from '@/components/GameOverExperience';
 import { ToastNotification, ToastItem } from '@/components/ToastNotification';
 import { RoomDebugPanel } from '@/components/RoomDebugPanel';
+import { MatchChat } from '@/components/MatchChat';
 import { getBoardAtMove, getMoveInsights } from '@/lib/game';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { loadProgression, saveProgression, updateStats } from '@/lib/progress';
@@ -88,6 +89,7 @@ function RoomPageContent() {
     id: number;
   } | null>(null);
   const [badgeToasts, setBadgeToasts] = useState<BadgeToastItem[]>([]);
+  const [liveReactions, setLiveReactions] = useState<LiveReaction[]>([]);
 
   // Local Replay State (Multiplayer replay is strictly local)
   const [isReplay, setIsReplay] = useState(false);
@@ -426,6 +428,9 @@ function RoomPageContent() {
           addToast({ type: 'player_left', seatIndex: msg.seatIndex });
         } else if (msg.type === 'host_changed') {
           addToast({ type: 'host_changed', seatIndex: msg.seatIndex, newHostPlayerId: msg.newHostPlayerId });
+        } else if (msg.type === 'reaction') {
+          soundManager.playReaction();
+          setLiveReactions((prev) => [...prev.slice(-9), msg]);
         } else if (msg.type === 'error') {
           if (msg.code === 'REMATCH_TIMEOUT') {
             addToast({ type: 'message', message: 'Rematch request timed out' });
@@ -626,6 +631,17 @@ function RoomPageContent() {
       isInputLockedRef.current = false;
     }, 300);
   };
+
+  const handleSendReaction = useCallback((reaction: { emoji?: string; quickMessage?: string }) => {
+    if (!socketRef.current) return;
+    socketRef.current.send(
+      JSON.stringify({
+        type: 'reaction',
+        emoji: reaction.emoji,
+        quickMessage: reaction.quickMessage,
+      })
+    );
+  }, []);
 
   const handleSetSeats = (seatsCount: 2 | 3 | 4) => {
     if (!socketRef.current || !isHost) return;
@@ -1097,6 +1113,14 @@ function RoomPageContent() {
           }
           isReplay={isReplayActive}
           isGameOver={Boolean(effectiveRoomState?.winner)}
+        />
+
+        {/* Match Emoji Reactions & Quick Messages Bar */}
+        <MatchChat
+          reactions={liveReactions}
+          onSendReaction={handleSendReaction}
+          onDismissReaction={(id) => setLiveReactions((prev) => prev.filter((r) => r.id !== id))}
+          className="mt-3 mb-1"
         />
 
         {/* Game Over Controls (BELOW the board: Again, Replay, Home OR step controls) */}

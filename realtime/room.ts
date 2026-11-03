@@ -74,6 +74,7 @@ export class GameRoomHandler {
   private messageTimestamps = new Map<string, number[]>();
   private joinCreateTimestamps = new Map<string, number[]>();
   private playerLastMessageTimestamps = new Map<string, number>();
+  private reactionTimestamps = new Map<string, number>();
   public lastActiveTimestamp: number;
   public gameOverTimestamp: number | null = null;
   public isExpired: boolean = false;
@@ -245,6 +246,7 @@ export class GameRoomHandler {
     this.connections.delete(connId);
     this.connToPlayerId.delete(connId);
     this.messageTimestamps.delete(connId);
+    this.reactionTimestamps.delete(connId);
   }
 
   public handleDisconnection(connId: string, now: number = Date.now()) {
@@ -252,6 +254,7 @@ export class GameRoomHandler {
     this.connections.delete(connId);
     this.connToPlayerId.delete(connId);
     this.messageTimestamps.delete(connId);
+    this.reactionTimestamps.delete(connId);
 
     if (playerId) {
       // Find seat
@@ -410,6 +413,8 @@ export class GameRoomHandler {
         return this.handleRematchDecline(connId, now);
       case 'leave':
         return this.handleLeave(connId, now);
+      case 'reaction':
+        return this.handleReaction(connId, msg.emoji, msg.quickMessage, now);
       case 'ping':
         return { success: true };
     }
@@ -1240,6 +1245,45 @@ export class GameRoomHandler {
       this.cancelPendingBotMove();
     }
 
+    return { success: true };
+  }
+
+  private handleReaction(
+    connId: string,
+    emoji?: string,
+    quickMessage?: string,
+    now: number = Date.now()
+  ): { success: boolean; error?: string } {
+    if (!emoji && !quickMessage) {
+      return { success: false, error: 'NO_CONTENT' };
+    }
+
+    const lastReaction = this.reactionTimestamps.get(connId) || 0;
+    if (now - lastReaction < 800) {
+      return { success: false, error: 'COOLDOWN' };
+    }
+    this.reactionTimestamps.set(connId, now);
+
+    const playerId = this.connToPlayerId.get(connId);
+    const seat = playerId ? this.state.seats.find((s) => s.playerId === playerId) : undefined;
+    const seatIndex = seat ? seat.seatIndex : -1;
+    const symbol: MarkSymbol = seat ? seat.symbol : 'X';
+    const playerName = seat ? (seat.playerName || seat.name || `Player ${seat.seatIndex + 1}`) : 'Spectator';
+
+    const id = `rx_${Math.random().toString(36).substring(2, 9)}_${now}`;
+
+    const reactionMsg: ServerMessage = {
+      type: 'reaction',
+      id,
+      seatIndex,
+      symbol,
+      playerName,
+      emoji: emoji || undefined,
+      quickMessage: quickMessage || undefined,
+      timestamp: now,
+    };
+
+    this.broadcast(reactionMsg);
     return { success: true };
   }
 
