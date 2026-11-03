@@ -1,0 +1,45 @@
+name: CI
+
+# Trigger this workflow on every git push or pull request to the main branch
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-and-build:
+    name: Test & Build
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Clone the repository code onto GitHub's server
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Step 2: Install pnpm package manager matching package.json
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.5.1
+
+      # Step 3: Install Node.js and cache pnpm dependencies for faster future runs
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      # Step 4: Install all project dependencies exactly as defined in pnpm-lock.yaml
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Step 5: Run all 162 unit and integration tests using Vitest
+      - name: Run Tests
+        run: pnpm test
+
+      # Step 6: Verify Next.js TypeScript check and production build
+      - name: Run Build Check
+        run: pnpm build
+        env:
+          NEXT_PUBLIC_APP_URL: https://vanishxo.online
