@@ -131,7 +131,7 @@ export const MatchChat: React.FC<MatchChatProps> = ({
             onClick={() => setIsQuickOpen((prev) => !prev)}
             disabled={disabled || isCooldown}
             aria-label="Open quick messages"
-            className={`flex items-center justify-center gap-1.5 h-10 px-3 rounded-2xl border text-xs font-bold transition-all shadow-md select-none outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
+            className={`flex items-center justify-center gap-1.5 h-9 sm:h-10 px-2.5 sm:px-3 rounded-2xl border text-xs font-bold transition-all shadow-md select-none outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
               isQuickOpen
                 ? 'bg-cyan-500/20 border-cyan-400 text-cyan-300 shadow-cyan-500/30'
                 : isCooldown || disabled
@@ -140,7 +140,7 @@ export const MatchChat: React.FC<MatchChatProps> = ({
             }`}
           >
             <MessageSquare className="w-3.5 h-3.5 text-cyan-400" />
-            <span className="hidden xs:inline sm:inline">Chat</span>
+            <span className="hidden sm:inline">Chat</span>
           </button>
         </div>
       </div>
