@@ -26,7 +26,7 @@ export const QuickMessages: React.FC<QuickMessagesProps> = ({
         <>
           {/* Backdrop click catcher */}
           <div
-            className="fixed inset-0 z-40"
+            className="fixed inset-0 z-40 bg-black/40 backdrop-blur-xs"
             onClick={onClose}
             aria-hidden="true"
           />
@@ -39,7 +39,7 @@ export const QuickMessages: React.FC<QuickMessagesProps> = ({
             transition={{ type: 'spring', damping: 25, stiffness: 350 }}
             role="dialog"
             aria-label="Quick Messages"
-            className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-[calc(100vw-32px)] sm:w-96 max-w-sm z-50 p-3 rounded-2xl bg-slate-900/95 border border-white/15 backdrop-blur-xl shadow-2xl shadow-cyan-950/40"
+            className="fixed sm:absolute bottom-20 sm:bottom-full sm:mb-2.5 left-1/2 -translate-x-1/2 w-[calc(100vw-32px)] sm:w-96 max-w-sm z-50 p-3 rounded-2xl bg-slate-900/95 border border-cyan-500/30 backdrop-blur-xl shadow-2xl shadow-cyan-950/60"
           >
             {/* Header */}
             <div className="flex items-center justify-between pb-2 mb-2.5 border-b border-white/10">
@@ -91,3 +91,4 @@ export const QuickMessages: React.FC<QuickMessagesProps> = ({
     </AnimatePresence>
   );
 };
+

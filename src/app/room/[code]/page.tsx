@@ -643,6 +643,10 @@ function RoomPageContent() {
     );
   }, []);
 
+  const handleDismissReaction = useCallback((id: string) => {
+    setLiveReactions((prev) => prev.filter((r) => r.id !== id));
+  }, []);
+
   const handleSetSeats = (seatsCount: 2 | 3 | 4) => {
     if (!socketRef.current || !isHost) return;
     socketRef.current.send(JSON.stringify({ type: 'set_seats', seatsCount }));
@@ -1119,7 +1123,7 @@ function RoomPageContent() {
         <MatchChat
           reactions={liveReactions}
           onSendReaction={handleSendReaction}
-          onDismissReaction={(id) => setLiveReactions((prev) => prev.filter((r) => r.id !== id))}
+          onDismissReaction={handleDismissReaction}
           className="mt-3 mb-1"
         />
 

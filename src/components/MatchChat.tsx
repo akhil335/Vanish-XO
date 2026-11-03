@@ -34,6 +34,7 @@ export const MatchChat: React.FC<MatchChatProps> = ({
 
   const cooldownTimerRef = useRef<NodeJS.Timeout | null>(null);
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const lastSendTimeRef = useRef<number>(0);
 
   // Clean up timers on unmount
   useEffect(() => {
@@ -67,7 +68,10 @@ export const MatchChat: React.FC<MatchChatProps> = ({
   }, []);
 
   const handleSelectEmoji = (emoji: EmojiReaction) => {
-    if (disabled || isCooldown) return;
+    const now = Date.now();
+    if (disabled || isCooldown || now - lastSendTimeRef.current < COOLDOWN_MS) return;
+    lastSendTimeRef.current = now;
+    setIsQuickOpen(false);
     triggerCooldown();
     soundManager.playReaction();
     triggerHaptic('reaction');
@@ -75,7 +79,10 @@ export const MatchChat: React.FC<MatchChatProps> = ({
   };
 
   const handleSelectQuickMessage = (quickMessage: QuickMessage) => {
-    if (disabled || isCooldown) return;
+    const now = Date.now();
+    if (disabled || isCooldown || now - lastSendTimeRef.current < COOLDOWN_MS) return;
+    lastSendTimeRef.current = now;
+    setIsQuickOpen(false);
     triggerCooldown();
     soundManager.playReaction();
     triggerHaptic('reaction');
@@ -135,17 +142,18 @@ export const MatchChat: React.FC<MatchChatProps> = ({
             <MessageSquare className="w-3.5 h-3.5 text-cyan-400" />
             <span className="hidden xs:inline sm:inline">Chat</span>
           </button>
-
-          {/* Quick Messages Popover */}
-          <QuickMessages
-            isOpen={isQuickOpen}
-            onClose={() => setIsQuickOpen(false)}
-            onSelectMessage={handleSelectQuickMessage}
-            isCooldown={isCooldown}
-            disabled={disabled}
-          />
         </div>
       </div>
+
+      {/* Quick Messages Popover / Drawer (Centered on screen for mobile, centered on bar for desktop) */}
+      <QuickMessages
+        isOpen={isQuickOpen}
+        onClose={() => setIsQuickOpen(false)}
+        onSelectMessage={handleSelectQuickMessage}
+        isCooldown={isCooldown}
+        disabled={disabled}
+      />
     </div>
   );
 };
+

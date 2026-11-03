@@ -11,13 +11,18 @@ interface ReactionBubbleProps {
 
 export const ReactionBubble: React.FC<ReactionBubbleProps> = ({ reaction, onDismiss }) => {
   const { id, symbol, playerName, emoji, quickMessage } = reaction;
+  const onDismissRef = React.useRef(onDismiss);
+
+  useEffect(() => {
+    onDismissRef.current = onDismiss;
+  }, [onDismiss]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      onDismiss?.(id);
+      onDismissRef.current?.(id);
     }, 2800);
     return () => clearTimeout(timer);
-  }, [id, onDismiss]);
+  }, [id]);
 
   const colorConfig = SEAT_COLORS[symbol as MarkSymbol] || {
     hex: '#00f0ff',
@@ -92,7 +97,6 @@ export const ReactionBubble: React.FC<ReactionBubbleProps> = ({ reaction, onDism
 
           {/* Quick Message Content */}
           <div className="text-white text-xs sm:text-sm font-semibold tracking-wide drop-shadow break-words flex items-center gap-1.5">
-            {emoji && <span className="text-base">{emoji}</span>}
             <span>{quickMessage}</span>
           </div>
 
@@ -106,3 +110,4 @@ export const ReactionBubble: React.FC<ReactionBubbleProps> = ({ reaction, onDism
     </motion.div>
   );
 };
+
