@@ -16,6 +16,9 @@ import { BADGE_DEFINITIONS, BadgeDefinition } from '@/lib/progress';
 export interface BadgeToastItem {
   id: string; // unique toast id
   badgeId: string;
+  customTitle?: string;
+  customName?: string;
+  customIcon?: string;
 }
 
 interface BadgeToastProps {
@@ -56,7 +59,11 @@ export const BadgeToast: React.FC<BadgeToastProps> = ({ toasts, onDismiss }) => 
       <AnimatePresence>
         {toasts.map((toast) => {
           const badge: BadgeDefinition | undefined = BADGE_DEFINITIONS.find((b) => b.id === toast.badgeId);
-          if (!badge) return null;
+          if (!badge && !toast.customName) return null;
+
+          const title = toast.customTitle || 'UNLOCKED';
+          const name = toast.customName || badge?.name || 'Achievement';
+          const icon = toast.customIcon || badge?.icon || 'zap';
 
           return (
             <motion.div
@@ -72,21 +79,21 @@ export const BadgeToast: React.FC<BadgeToastProps> = ({ toasts, onDismiss }) => 
               onAnimationComplete={() => {
                 const timer = setTimeout(() => {
                   onDismiss(toast.id);
-                }, 3200);
+                }, 3800);
                 return () => clearTimeout(timer);
               }}
               className="flex items-center gap-2.5 px-3.5 py-2 rounded-2xl bg-slate-950/95 border border-cyan-400/50 backdrop-blur-xl shadow-[0_0_25px_rgba(0,240,255,0.35)] pointer-events-auto cursor-pointer"
               onClick={() => onDismiss(toast.id)}
             >
               <div className="w-8 h-8 rounded-xl bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center shadow-[0_0_10px_rgba(0,240,255,0.4)]">
-                {renderBadgeIcon(badge.icon, 18)}
+                {renderBadgeIcon(icon, 18)}
               </div>
               <div className="flex flex-col">
                 <span className="text-[10px] font-black tracking-widest text-cyan-400 uppercase">
-                  UNLOCKED
+                  {title}
                 </span>
                 <span className="text-xs font-bold text-white tracking-wide">
-                  {badge.name}
+                  {name}
                 </span>
               </div>
             </motion.div>

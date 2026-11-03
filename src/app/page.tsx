@@ -496,6 +496,72 @@ function HomeContent() {
           } catch { }
         }
 
+        // Fewest Moves to Beat the Bot Leaderboard (Medium & Hard bot only)
+        if (mode === 'bot' && humanWon && (botDifficulty === 'medium' || botDifficulty === 'hard')) {
+          const humanMoves = finalState.history.filter((m) => m.player === 'X').length;
+          let durationSecs = 10;
+          if (gameStartTimeRef.current) {
+            const diff = Math.round((Date.now() - gameStartTimeRef.current) / 100) / 10;
+            if (!isNaN(diff) && diff >= 0.8) {
+              durationSecs = diff;
+            }
+          }
+
+          if (session?.user?.id) {
+            try {
+              fetch('/api/leaderboard/bot', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  difficulty: botDifficulty,
+                  history: finalState.history,
+                  durationSeconds: durationSecs,
+                }),
+              })
+                .then(
+                  (res) =>
+                    res.json() as Promise<{
+                      success?: boolean;
+                      isImprovement?: boolean;
+                      record?: { moves: number; durationSeconds: number };
+                      rank?: number;
+                    }>
+                )
+                .then((data) => {
+                  if (data.success && data.isImprovement && data.record) {
+                    const rankStr = data.rank ? ` · Rank #${data.rank}` : '';
+                    setBadgeToasts((prevToasts) => [
+                      ...prevToasts,
+                      {
+                        id: `bot-speedrun-${Date.now()}`,
+                        badgeId: 'bot-hard',
+                        customTitle: 'AI SPEEDRUN RECORD',
+                        customName: `${botDifficulty.toUpperCase()} Bot in ${data.record!.moves} moves (${data.record!.durationSeconds}s)${rankStr}`,
+                        customIcon: botDifficulty === 'hard' ? 'bot-hard' : 'bot-med',
+                      },
+                    ]);
+                    if (typeof window !== 'undefined') {
+                      window.dispatchEvent(new Event('vanish_xo_bot_leaderboard_updated'));
+                    }
+                  }
+                })
+                .catch(() => {});
+            } catch {}
+          } else {
+            // Unauthenticated guest notification
+            setBadgeToasts((prevToasts) => [
+              ...prevToasts,
+              {
+                id: `guest-bot-win-${Date.now()}`,
+                badgeId: 'trophy',
+                customTitle: 'AI DEFEATED',
+                customName: `Won in ${humanMoves} moves! Sign in to join the AI Leaderboard.`,
+                customIcon: 'trophy',
+              },
+            ]);
+          }
+        }
+
         return res.nextData;
       });
     },

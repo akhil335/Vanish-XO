@@ -40,7 +40,6 @@ if (!url || !token) {
 
 const redis = new Redis({ url, token });
 const LEADERBOARD_KEY = 'vanish_xo:leaderboard';
-const PROFILE_KEY_PREFIX = 'vanish_xo:player:';
 
 async function confirmReset() {
   const args = process.argv.slice(2);
@@ -78,20 +77,20 @@ async function main() {
   console.log('\n🔄 Connecting to Upstash Redis to purge all leaderboard data...');
 
   // 1. Delete the leaderboard sorted set
-  const deletedLeaderboard = await redis.del(LEADERBOARD_KEY);
-  console.log(`🗑️  Deleted leaderboard sorted set "${LEADERBOARD_KEY}": ${deletedLeaderboard} key removed`);
+  const deletedLeaderboard = await redis.del(LEADERBOARD_KEY, 'vanish_xo:bot_leaderboard:medium', 'vanish_xo:bot_leaderboard:hard');
+  console.log(`🗑️  Deleted leaderboard sorted sets: ${deletedLeaderboard} keys removed`);
 
-  // 2. Scan and delete all player profile keys
+  // 2. Scan and delete all player profile and bot record keys
   let cursor = '0';
   let totalProfilesDeleted = 0;
 
   do {
-    const [nextCursor, keys] = await redis.scan(cursor, { match: `${PROFILE_KEY_PREFIX}*`, count: 100 });
+    const [nextCursor, keys] = await redis.scan(cursor, { match: `vanish_xo:*`, count: 100 });
     cursor = nextCursor;
     if (keys && keys.length > 0) {
       await redis.del(...keys);
       totalProfilesDeleted += keys.length;
-      console.log(`🗑️  Deleted ${keys.length} player profile keys (total so far: ${totalProfilesDeleted})...`);
+      console.log(`🗑️  Deleted ${keys.length} keys (total so far: ${totalProfilesDeleted})...`);
     }
   } while (cursor !== '0');
 

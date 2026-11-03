@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { resetLeaderboard } from '@/lib/leaderboard';
+import { resetBotLeaderboard } from '@/lib/bot-leaderboard';
 
 export async function POST(request: Request) {
   try {
@@ -52,10 +53,11 @@ export async function POST(request: Request) {
     }
 
     const result = await resetLeaderboard();
+    const botResult = await resetBotLeaderboard();
     return NextResponse.json({
       success: true,
       message: 'All leaderboard data, ratings, and player profiles have been deleted.',
-      clearedProfiles: result.clearedCount,
+      clearedProfiles: result.clearedCount + botResult.clearedCount,
     });
   } catch (error: unknown) {
     console.error('Failed to reset leaderboard:', error);
