@@ -1,5 +1,6 @@
 import { Redis } from '@upstash/redis';
 import { INITIAL_RATING, calculateElo, BOT_RATINGS } from './elo';
+import { generateGuestName } from './player';
 
 export interface PlayerLeaderboardProfile {
   id: string;
@@ -96,7 +97,7 @@ export async function getLeaderboard(limit = 50): Promise<LeaderboardEntry[]> {
           entries.push({
             rank: i + 1,
             playerId: pId,
-            playerName: profile?.name || 'Player',
+            playerName: profile?.name || generateGuestName(pId),
             rating: score,
             gamesPlayed: profile?.gamesPlayed || 1,
             wins: profile?.wins || 0,
@@ -113,7 +114,7 @@ export async function getLeaderboard(limit = 50): Promise<LeaderboardEntry[]> {
           entries.push({
             rank: Math.floor(i / 2) + 1,
             playerId: pId,
-            playerName: profile?.name || 'Player',
+            playerName: profile?.name || generateGuestName(pId),
             rating: score,
             gamesPlayed: profile?.gamesPlayed || 1,
             wins: profile?.wins || 0,
@@ -137,13 +138,36 @@ export async function getLeaderboard(limit = 50): Promise<LeaderboardEntry[]> {
   return allProfiles.map((p, idx) => ({
     rank: idx + 1,
     playerId: p.id,
-    playerName: p.name,
+    playerName: p.name || generateGuestName(p.id),
     rating: p.rating,
     gamesPlayed: p.gamesPlayed,
     wins: p.wins,
     losses: p.losses,
     draws: p.draws,
   }));
+}
+
+export async function resetLeaderboard(): Promise<{ success: boolean; clearedCount: number }> {
+  inMemoryProfiles.clear();
+  const redis = getRedis();
+  let clearedCount = 0;
+  if (redis) {
+    try {
+      await redis.del(LEADERBOARD_KEY);
+      let cursor = '0';
+      do {
+        const [nextCursor, keys] = await redis.scan(cursor, { match: `${PROFILE_KEY_PREFIX}*`, count: 100 });
+        cursor = nextCursor;
+        if (keys && keys.length > 0) {
+          await redis.del(...keys);
+          clearedCount += keys.length;
+        }
+      } while (cursor !== '0');
+    } catch (e) {
+      console.warn('Failed to completely clear Upstash Redis:', e);
+    }
+  }
+  return { success: true, clearedCount };
 }
 
 export async function recordGameResult(input: GameResultInput): Promise<{
@@ -157,6 +181,16 @@ export async function recordGameResult(input: GameResultInput): Promise<{
     throw new Error('playerId is required');
   }
 
+  // Reject guest IDs: guests cannot earn Elo or be on the leaderboard
+  if (playerId.startsWith('p_') || playerId === 'guest') {
+    throw new Error('Guests cannot be ranked on the leaderboard. Sign in to record results.');
+  }
+
+  // Games against bot or unverified matches must NEVER change rating or create leaderboard entry
+  if (!opponentId || opponentId === 'bot' || opponentId.startsWith('bot') || BOT_RATINGS[opponentId]) {
+    throw new Error('Bot games are unrated and cannot be recorded to the leaderboard');
+  }
+
   const redis = getRedis();
 
   // 1. Get or initialize player profile
@@ -168,7 +202,7 @@ export async function recordGameResult(input: GameResultInput): Promise<{
       }
     : {
         id: playerId,
-        name: playerName && playerName.trim() ? playerName.trim() : 'Player',
+        name: playerName && playerName.trim() ? playerName.trim() : generateGuestName(playerId),
         rating: INITIAL_RATING,
         gamesPlayed: 0,
         wins: 0,
@@ -179,9 +213,7 @@ export async function recordGameResult(input: GameResultInput): Promise<{
 
   // 2. Determine opponent rating
   let opponentRating = INITIAL_RATING;
-  if (opponentId && BOT_RATINGS[opponentId]) {
-    opponentRating = BOT_RATINGS[opponentId];
-  } else if (opponentId && !opponentId.startsWith('bot')) {
+  if (opponentId && !opponentId.startsWith('bot')) {
     const oppProfile = await getPlayerProfile(opponentId);
     if (oppProfile) {
       opponentRating = oppProfile.rating;
@@ -216,5 +248,230 @@ export async function recordGameResult(input: GameResultInput): Promise<{
     success: true,
     player,
     delta: deltaA,
+  };
+}
+
+// In-memory fallbacks when Redis is not configured
+const inMemoryRoomSessions = new Map<string, { userId: string; name: string; isGuest?: boolean }>();
+const inMemoryRecordedGames = new Set<string>();
+
+const ROOM_SESSION_PREFIX = 'vanish_xo:room_session:';
+const GAME_RECORDED_PREFIX = 'vanish_xo:game_recorded:';
+
+export async function registerRoomPlayerSession(
+  roomCode: string,
+  seatIndex: number,
+  playerId: string,
+  userId: string,
+  name?: string
+): Promise<void> {
+  const normCode = roomCode.toUpperCase().trim();
+  const sessionData = { userId, name: name || 'Player', isGuest: false };
+  const redis = getRedis();
+  if (redis) {
+    try {
+      await redis.set(`${ROOM_SESSION_PREFIX}${normCode}:${seatIndex}`, JSON.stringify(sessionData), { ex: 7200 });
+      if (playerId) {
+        await redis.set(`${ROOM_SESSION_PREFIX}${normCode}:pid:${playerId}`, JSON.stringify(sessionData), { ex: 7200 });
+      }
+    } catch (e) {
+      console.warn('Redis error in registerRoomPlayerSession:', e);
+    }
+  }
+  inMemoryRoomSessions.set(`${normCode}:${seatIndex}`, sessionData);
+  if (playerId) {
+    inMemoryRoomSessions.set(`${normCode}:pid:${playerId}`, sessionData);
+  }
+}
+
+export async function registerRoomGuestSession(
+  roomCode: string,
+  seatIndex: number,
+  playerId: string
+): Promise<void> {
+  const normCode = roomCode.toUpperCase().trim();
+  const sessionData = { userId: playerId || 'guest', name: 'Guest', isGuest: true };
+  const redis = getRedis();
+  if (redis) {
+    try {
+      await redis.set(`${ROOM_SESSION_PREFIX}${normCode}:${seatIndex}`, JSON.stringify(sessionData), { ex: 7200 });
+      if (playerId) {
+        await redis.set(`${ROOM_SESSION_PREFIX}${normCode}:pid:${playerId}`, JSON.stringify(sessionData), { ex: 7200 });
+      }
+    } catch (e) {
+      console.warn('Redis error in registerRoomGuestSession:', e);
+    }
+  }
+  inMemoryRoomSessions.set(`${normCode}:${seatIndex}`, sessionData);
+  if (playerId) {
+    inMemoryRoomSessions.set(`${normCode}:pid:${playerId}`, sessionData);
+  }
+}
+
+export async function getRoomSeatUser(
+  roomCode: string,
+  seatIndex: number,
+  playerId?: string
+): Promise<{ userId: string; name: string; isGuest?: boolean } | null> {
+  const normCode = roomCode.toUpperCase().trim();
+  const redis = getRedis();
+  if (redis) {
+    try {
+      if (playerId) {
+        const byPid = await redis.get<string | { userId: string; name: string; isGuest?: boolean }>(
+          `${ROOM_SESSION_PREFIX}${normCode}:pid:${playerId}`
+        );
+        if (byPid) {
+          return typeof byPid === 'string' ? JSON.parse(byPid) : byPid;
+        }
+      }
+      const bySeat = await redis.get<string | { userId: string; name: string; isGuest?: boolean }>(
+        `${ROOM_SESSION_PREFIX}${normCode}:${seatIndex}`
+      );
+      if (bySeat) {
+        return typeof bySeat === 'string' ? JSON.parse(bySeat) : bySeat;
+      }
+    } catch (e) {
+      console.warn('Redis error in getRoomSeatUser:', e);
+    }
+  }
+
+  if (playerId && inMemoryRoomSessions.has(`${normCode}:pid:${playerId}`)) {
+    return inMemoryRoomSessions.get(`${normCode}:pid:${playerId}`) || null;
+  }
+  return inMemoryRoomSessions.get(`${normCode}:${seatIndex}`) || null;
+}
+
+export async function markGameRecorded(gameId: string): Promise<boolean> {
+  const key = `${GAME_RECORDED_PREFIX}${gameId}`;
+  const redis = getRedis();
+  if (redis) {
+    try {
+      // SET with NX returns 'OK' if set, null if already exists
+      const res = await redis.set(key, '1', { nx: true, ex: 86400 });
+      return res === 'OK';
+    } catch (e) {
+      console.warn('Redis error in markGameRecorded:', e);
+    }
+  }
+
+  if (inMemoryRecordedGames.has(key)) {
+    return false;
+  }
+  inMemoryRecordedGames.add(key);
+  return true;
+}
+
+export async function recordMatchResult(
+  playerAId: string,
+  playerAName: string,
+  playerBId: string,
+  playerBName: string,
+  scoreA: number
+): Promise<{
+  success: boolean;
+  playerA: PlayerLeaderboardProfile;
+  playerB: PlayerLeaderboardProfile;
+  deltaA: number;
+  deltaB: number;
+}> {
+  if (!playerAId || !playerBId) {
+    throw new Error('Both player IDs are required to record a ranked match');
+  }
+
+  if (
+    playerAId.startsWith('p_') || playerAId === 'guest' ||
+    playerBId.startsWith('p_') || playerBId === 'guest'
+  ) {
+    throw new Error('Both players must be signed in to record a ranked match');
+  }
+
+  if (playerAId.startsWith('bot') || playerBId.startsWith('bot')) {
+    throw new Error('Bot games are unrated and cannot be recorded to the leaderboard');
+  }
+
+  // 1. Fetch existing profiles
+  const existingA = await getPlayerProfile(playerAId);
+  const existingB = await getPlayerProfile(playerBId);
+
+  const playerA: PlayerLeaderboardProfile = existingA
+    ? {
+        ...existingA,
+        name: playerAName && playerAName.trim() ? playerAName.trim() : existingA.name,
+      }
+    : {
+        id: playerAId,
+        name: playerAName && playerAName.trim() ? playerAName.trim() : generateGuestName(playerAId),
+        rating: INITIAL_RATING,
+        gamesPlayed: 0,
+        wins: 0,
+        losses: 0,
+        draws: 0,
+        updatedAt: Date.now(),
+      };
+
+  const playerB: PlayerLeaderboardProfile = existingB
+    ? {
+        ...existingB,
+        name: playerBName && playerBName.trim() ? playerBName.trim() : existingB.name,
+      }
+    : {
+        id: playerBId,
+        name: playerBName && playerBName.trim() ? playerBName.trim() : generateGuestName(playerBId),
+        rating: INITIAL_RATING,
+        gamesPlayed: 0,
+        wins: 0,
+        losses: 0,
+        draws: 0,
+        updatedAt: Date.now(),
+      };
+
+  // 2. Calculate Elo update
+  const { newRatingA, newRatingB, deltaA, deltaB } = calculateElo(
+    playerA.rating,
+    playerB.rating,
+    scoreA
+  );
+
+  playerA.rating = newRatingA;
+  playerA.gamesPlayed += 1;
+  if (scoreA === 1) playerA.wins += 1;
+  else if (scoreA === 0) playerA.losses += 1;
+  else playerA.draws += 1;
+  playerA.updatedAt = Date.now();
+
+  playerB.rating = newRatingB;
+  playerB.gamesPlayed += 1;
+  if (scoreA === 0) playerB.wins += 1;
+  else if (scoreA === 1) playerB.losses += 1;
+  else playerB.draws += 1;
+  playerB.updatedAt = Date.now();
+
+  // 3. Save to Redis or memory store
+  const redis = getRedis();
+  if (redis) {
+    try {
+      await Promise.all([
+        redis.zadd(LEADERBOARD_KEY, { score: playerA.rating, member: playerA.id }),
+        redis.set(`${PROFILE_KEY_PREFIX}${playerA.id}`, JSON.stringify(playerA)),
+        redis.zadd(LEADERBOARD_KEY, { score: playerB.rating, member: playerB.id }),
+        redis.set(`${PROFILE_KEY_PREFIX}${playerB.id}`, JSON.stringify(playerB)),
+      ]);
+    } catch (e) {
+      console.warn('Failed to save both profiles to Upstash Redis, saving in memory:', e);
+      inMemoryProfiles.set(playerA.id, playerA);
+      inMemoryProfiles.set(playerB.id, playerB);
+    }
+  } else {
+    inMemoryProfiles.set(playerA.id, playerA);
+    inMemoryProfiles.set(playerB.id, playerB);
+  }
+
+  return {
+    success: true,
+    playerA,
+    playerB,
+    deltaA,
+    deltaB,
   };
 }

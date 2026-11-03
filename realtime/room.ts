@@ -21,6 +21,7 @@ import {
   BOT_TIMING_CONFIG,
   getBotThinkingDelay,
 } from '../src/lib/game';
+import { generateGuestName } from '../src/lib/player';
 
 export function createUninitializedRoomState(roomCode: string): RoomState {
   const baseGame = createGame(2);
@@ -264,13 +265,22 @@ export class GameRoomHandler {
           seat.isReady = false;
           seat.ready = false;
         }
+        if (this.state.status === 'playing') {
+          this.state.paused = true;
+          this.state.pausedReason = 'opponent_disconnected';
+          this.state.disconnectGraceExpiresAt = now + 30000;
+          this.cancelPendingBotMove();
+        }
+        if (this.state.status === 'finished') {
+          this.state.rematchRequest = null;
+        }
         this.broadcast({ type: 'player_left', seatIndex: seat.seatIndex });
 
         // Note: A refresh or dropped connection must NOT change the host.
         // Transfer host only if host explicitly leaves or after 60s grace period.
         this.checkIfAllHumansLeft();
         if (this.onScheduleAlarm) {
-          this.onScheduleAlarm(now + 60000);
+          this.onScheduleAlarm(now + 30000);
         }
         this.broadcastState();
       }
@@ -348,7 +358,15 @@ export class GameRoomHandler {
     // A room starts as "uninitialized" with no host, no players, no game.
     if (this.state.status === 'uninitialized') {
       if (message.type === 'create') {
-        return this.handleCreate(connId, message.playerId, message.seatsCount, message.matchToken, message.matchConfig);
+        return this.handleCreate(
+          connId,
+          message.playerId,
+          message.seatsCount,
+          message.matchToken,
+          message.matchConfig,
+          message.playerName || message.name,
+          message.userId
+        );
       } else {
         // If "join" (or any other message) is sent to an uninitialized room, reply with ROOM_NOT_FOUND, then close connection
         this.sendTo(connId, { type: 'error', code: 'ROOM_NOT_FOUND', message: 'Room not found' });
@@ -370,9 +388,9 @@ export class GameRoomHandler {
   private processIntent(connId: string, msg: ClientMessage, now: number): { success: boolean; error?: string } {
     switch (msg.type) {
       case 'create':
-        return this.handleCreate(connId, msg.playerId, msg.seatsCount, msg.matchToken, msg.matchConfig);
+        return this.handleCreate(connId, msg.playerId, msg.seatsCount, msg.matchToken, msg.matchConfig, msg.playerName || msg.name, msg.userId);
       case 'join':
-        return this.handleJoin(connId, msg.playerId, msg.matchConfig, msg.matchToken, now);
+        return this.handleJoin(connId, msg.playerId, msg.matchConfig, msg.matchToken, now, msg.playerName || msg.name, msg.userId);
       case 'set_seats':
         return this.handleSetSeats(connId, msg.seatsCount);
       case 'set_bot_seat':
@@ -384,7 +402,12 @@ export class GameRoomHandler {
       case 'place':
         return this.handlePlace(connId, msg.cell, now);
       case 'rematch':
+      case 'rematch_request':
         return this.handleRematch(connId, now);
+      case 'rematch_accept':
+        return this.handleRematchAccept(connId, now);
+      case 'rematch_decline':
+        return this.handleRematchDecline(connId, now);
       case 'leave':
         return this.handleLeave(connId, now);
       case 'ping':
@@ -452,7 +475,9 @@ export class GameRoomHandler {
     playerId: string,
     seatsCount: 2 | 3 | 4 = 2,
     matchToken?: string,
-    matchConfig?: MatchConfig
+    matchConfig?: MatchConfig,
+    playerName?: string,
+    userId?: string
   ): { success: boolean; error?: string } {
     if (this.state.status !== 'uninitialized') {
       if (process.env.NODE_ENV === 'development') {
@@ -473,8 +498,16 @@ export class GameRoomHandler {
     this.state.seatCount = chosenSeats;
     this.state.seatsCount = chosenSeats;
 
+    const rawName = (playerName || '').trim();
+    const resolvedName = (rawName && rawName !== 'Player')
+      ? rawName
+      : (playerId && playerId.startsWith('p_') ? generateGuestName(playerId) : (rawName || 'Player'));
+
     if (this.state.seats[0]) {
       this.state.seats[0].playerId = playerId;
+      this.state.seats[0].playerName = resolvedName;
+      this.state.seats[0].name = resolvedName;
+      this.state.seats[0].userId = userId || null;
       this.state.seats[0].joinedAt = now;
       this.state.seats[0].isConnected = true;
       this.state.seats[0].connected = true;
@@ -510,6 +543,9 @@ export class GameRoomHandler {
         const target = this.state.seats[matchConfig.assignedSeatIndex];
         if (target) {
           target.playerId = playerId;
+          target.playerName = resolvedName;
+          target.name = resolvedName;
+          target.userId = userId || null;
           target.kind = 'human';
           target.joinedAt = now;
           target.isConnected = true;
@@ -536,7 +572,9 @@ export class GameRoomHandler {
     playerId: string,
     matchConfig?: MatchConfig,
     matchToken?: string,
-    now: number = Date.now()
+    now: number = Date.now(),
+    playerName?: string,
+    userId?: string
   ): { success: boolean; error?: string } {
     this.connToPlayerId.set(connId, playerId);
     this.playerLastMessageTimestamps.set(playerId, now);
@@ -546,7 +584,34 @@ export class GameRoomHandler {
     if (existingSeat) {
       existingSeat.isConnected = true;
       existingSeat.connected = true;
+      if (playerName) {
+        const rawName = playerName.trim();
+        const resolvedName = (rawName && rawName !== 'Player')
+          ? rawName
+          : (playerId && playerId.startsWith('p_') ? generateGuestName(playerId) : (rawName || existingSeat.playerName || 'Player'));
+        existingSeat.playerName = resolvedName;
+        existingSeat.name = resolvedName;
+      } else if (!existingSeat.playerName || existingSeat.playerName === 'Player') {
+        if (playerId && playerId.startsWith('p_')) {
+          existingSeat.playerName = generateGuestName(playerId);
+          existingSeat.name = existingSeat.playerName;
+        }
+      }
+      if (userId) {
+        existingSeat.userId = userId;
+      }
+      if (existingSeat.disconnectedAt && this.state.status === 'playing' && this.state.turnStartedAt) {
+        this.state.turnStartedAt += (now - existingSeat.disconnectedAt);
+      }
       existingSeat.disconnectedAt = null;
+
+      // Check if all seated humans are reconnected -> unpause game
+      const anyStillDisconnected = this.state.seats.some((s) => !s.isBot && s.playerId !== null && !s.isConnected);
+      if (!anyStillDisconnected) {
+        this.state.paused = false;
+        this.state.pausedReason = null;
+        this.state.disconnectGraceExpiresAt = null;
+      }
 
       // Host reconnecting keeps host role and is always ready
       if (this.state.hostPlayerId === playerId) {
@@ -561,9 +626,8 @@ export class GameRoomHandler {
         existingSeat.ready = true;
       }
 
-      // Check if all humans are reconnected -> cancel 60s grace alarm
-      const hasDisconnected = this.state.seats.some((s) => !s.isBot && s.playerId !== null && !s.isConnected);
-      if (!hasDisconnected && this.onCancelAlarm) {
+      // Check if all humans are reconnected -> cancel grace alarm
+      if (!anyStillDisconnected && this.onCancelAlarm) {
         this.onCancelAlarm();
       }
 
@@ -632,7 +696,16 @@ export class GameRoomHandler {
       if (matchToken) {
         this.claimedSeatTokens.set(matchToken, playerId);
       }
+      const rawTargetName = (playerName || '').trim();
+      const resolvedTargetName = (rawTargetName && rawTargetName !== 'Player')
+        ? rawTargetName
+        : (playerId && playerId.startsWith('p_') ? generateGuestName(playerId) : (rawTargetName || 'Player'));
       targetSeat.playerId = playerId;
+      targetSeat.playerName = resolvedTargetName;
+      targetSeat.name = resolvedTargetName;
+      if (userId) {
+        targetSeat.userId = userId;
+      }
       targetSeat.kind = 'human';
       targetSeat.joinedAt = now;
       targetSeat.isConnected = true;
@@ -674,7 +747,14 @@ export class GameRoomHandler {
     const emptySeat = this.state.seats.find((s) => s.playerId === null && !s.isBot);
 
     if (emptySeat && this.state.status === 'waiting') {
+      const rawEmptyName = (playerName || '').trim();
+      const resolvedEmptyName = (rawEmptyName && rawEmptyName !== 'Player')
+        ? rawEmptyName
+        : (playerId && playerId.startsWith('p_') ? generateGuestName(playerId) : (rawEmptyName || 'Player'));
       emptySeat.playerId = playerId;
+      emptySeat.playerName = resolvedEmptyName;
+      emptySeat.name = resolvedEmptyName;
+      emptySeat.userId = userId || null;
       emptySeat.kind = 'human';
       emptySeat.joinedAt = now;
       emptySeat.isConnected = true;
@@ -886,6 +966,8 @@ export class GameRoomHandler {
     };
     this.state.status = 'playing';
     this.state.phase = 'playing';
+    this.state.gameId = `${this.roomCode}_${now}`;
+    this.state.isAbandoned = false;
     this.state.turnSeatIndex = 0;
     this.state.startingSeatIndex = 0;
     this.state.turnStartedAt = now;
@@ -907,6 +989,11 @@ export class GameRoomHandler {
   }
 
   private handlePlace(connId: string, cell: number, now: number): { success: boolean; error?: string } {
+    if (this.state.paused) {
+      this.sendTo(connId, { type: 'error', code: 'GAME_PAUSED', message: 'Game is paused waiting for player' });
+      return { success: false, error: 'GAME_PAUSED' };
+    }
+
     if (this.state.status !== 'playing') {
       this.sendTo(connId, { type: 'error', code: 'NOT_PLAYING' });
       return { success: false, error: 'NOT_PLAYING' };
@@ -955,25 +1042,122 @@ export class GameRoomHandler {
       return { success: false, error: 'GAME_NOT_FINISHED' };
     }
 
-    // After game ends, rematch includes remaining players, filling empty seats with bots
-    for (const seat of this.state.seats) {
-      if (seat.playerId === null && !seat.isBot) {
-        seat.isBot = true;
-        seat.kind = 'bot';
-        seat.isReady = true;
-        seat.ready = true;
-        seat.isConnected = true;
-        seat.connected = true;
-      }
+    const playerId = this.connToPlayerId.get(connId);
+    if (!playerId) {
+      return { success: false, error: 'UNAUTHORIZED' };
     }
 
+    const seat = this.state.seats.find((s) => s.playerId === playerId);
+    if (!seat) {
+      return { success: false, error: 'NOT_A_PLAYER' };
+    }
+
+    // Bug 4: Online room games must NEVER use the bot!
+    // Check if opponent is present and connected (no empty/disconnected seats)
+    const otherSeats = this.state.seats.filter((s) => s.seatIndex !== seat.seatIndex);
+    const hasEmptyOrDisconnected = otherSeats.some(
+      (s) => !s.isBot && (s.playerId === null || !s.isConnected)
+    );
+
+    if (hasEmptyOrDisconnected) {
+      this.sendTo(connId, {
+        type: 'error',
+        code: 'OPPONENT_NOT_AVAILABLE',
+        message: 'Waiting for opponent...',
+      });
+      return { success: false, error: 'OPPONENT_NOT_AVAILABLE' };
+    }
+
+    // Bug 2: Check if there are other human players who must agree
+    const otherHumans = otherSeats.filter((s) => !s.isBot && s.playerId !== null);
+
+    if (otherHumans.length > 0) {
+      // Check if another player already requested a rematch
+      if (this.state.rematchRequest && this.state.rematchRequest.requestedBy !== playerId) {
+        // The other player requested, so this counts as an ACCEPT!
+        return this.handleRematchAccept(connId, now);
+      }
+
+      // If this player already requested, return success (already waiting)
+      if (this.state.rematchRequest && this.state.rematchRequest.requestedBy === playerId) {
+        return { success: true };
+      }
+
+      // Set rematch request
+      this.state.rematchRequest = {
+        requestedBy: playerId,
+        requestedBySeatIndex: seat.seatIndex,
+        requestedAt: now,
+        requesterName: seat.playerName || seat.name || 'Opponent',
+      };
+      this.state.rematchDeclined = false;
+      this.broadcastState();
+      return { success: true };
+    }
+
+    // If no other humans (e.g. human playing against bots):
     this.cancelPendingBotMove();
     this.state = resetRoomForRematch(this.state, now);
+    this.state.status = 'playing';
+    this.state.phase = 'playing';
     this.gameOverTimestamp = null;
     this.broadcastState();
 
     if (this.state.seats[this.state.turnSeatIndex]?.isBot) {
       this.scheduleNextBotMove(now);
+    }
+    return { success: true };
+  }
+
+  private handleRematchAccept(connId: string, now: number): { success: boolean; error?: string } {
+    if (this.state.status !== 'finished') {
+      return { success: false, error: 'GAME_NOT_FINISHED' };
+    }
+
+    const playerId = this.connToPlayerId.get(connId);
+    if (!playerId) return { success: false, error: 'UNAUTHORIZED' };
+
+    const seat = this.state.seats.find((s) => s.playerId === playerId);
+    if (!seat) return { success: false, error: 'NOT_A_PLAYER' };
+
+    const otherSeats = this.state.seats.filter((s) => s.seatIndex !== seat.seatIndex);
+    const hasEmptyOrDisconnected = otherSeats.some(
+      (s) => !s.isBot && (s.playerId === null || !s.isConnected)
+    );
+    if (hasEmptyOrDisconnected) {
+      this.sendTo(connId, {
+        type: 'error',
+        code: 'OPPONENT_NOT_AVAILABLE',
+        message: 'Opponent is not available for a rematch',
+      });
+      return { success: false, error: 'OPPONENT_NOT_AVAILABLE' };
+    }
+
+    // Clear rematch request
+    this.state.rematchRequest = null;
+    this.state.rematchDeclined = false;
+
+    // Do NOT fill empty seats with bots (Bug 4)
+    this.cancelPendingBotMove();
+    this.state = resetRoomForRematch(this.state, now);
+    this.state.status = 'playing';
+    this.state.phase = 'playing';
+    this.state.gameId = `${this.roomCode}_${now}`;
+    this.state.isAbandoned = false;
+    this.gameOverTimestamp = null;
+    this.broadcastState();
+
+    if (this.state.seats[this.state.turnSeatIndex]?.isBot) {
+      this.scheduleNextBotMove(now);
+    }
+    return { success: true };
+  }
+
+  private handleRematchDecline(connId: string, _now: number): { success: boolean; error?: string } {
+    if (this.state.rematchRequest) {
+      this.state.rematchRequest = null;
+      this.state.rematchDeclined = true;
+      this.broadcastState();
     }
     return { success: true };
   }
@@ -992,26 +1176,21 @@ export class GameRoomHandler {
         const isLeavingHost = this.state.hostPlayerId === playerId;
 
         if (this.state.status === 'playing') {
-          // Mid-game leave: seat taken over by bot immediately
-          seat.isBot = true;
-          seat.kind = 'bot';
-          seat.playerId = null;
-          seat.isConnected = true;
-          seat.connected = true;
-          seat.isReady = true;
-          seat.ready = true;
-          seat.disconnectedAt = null;
+          // Mid-game leave: end game with clear message, remaining human wins. NEVER use bots!
+          const remainingPlayer = this.state.seats.find(
+            (s) => s.seatIndex !== seat.seatIndex && s.playerId !== null && !s.isBot
+          );
+          this.state.status = 'finished';
+          this.state.winner = remainingPlayer ? remainingPlayer.symbol : null;
+          this.state.paused = false;
+          this.state.pausedReason = 'opponent_left';
+          this.state.isAbandoned = true;
+          this.gameOverTimestamp = now;
+          this.cancelPendingBotMove();
 
-          if (isLeavingHost) {
-            this.transferHostLongestPresent(now);
-          }
-
-          if (this.state.turnSeatIndex === seat.seatIndex) {
-            this.scheduleNextBotMove(now);
-          }
-        } else {
-          // Waiting or Finished: deliberate leave frees the seat immediately
           seat.playerId = null;
+          seat.playerName = null;
+          seat.name = null;
           seat.kind = 'empty';
           seat.isConnected = false;
           seat.connected = false;
@@ -1019,6 +1198,27 @@ export class GameRoomHandler {
           seat.ready = false;
           seat.disconnectedAt = null;
           seat.joinedAt = null;
+
+          if (isLeavingHost) {
+            this.transferHostLongestPresent(now);
+          }
+        } else {
+          // Waiting or Finished: deliberate leave frees the seat immediately
+          seat.playerId = null;
+          seat.playerName = null;
+          seat.name = null;
+          seat.kind = 'empty';
+          seat.isConnected = false;
+          seat.connected = false;
+          seat.isReady = false;
+          seat.ready = false;
+          seat.disconnectedAt = null;
+          seat.joinedAt = null;
+
+          if (this.state.status === 'finished') {
+            this.state.rematchRequest = null;
+            this.state.pausedReason = 'opponent_left';
+          }
 
           if (isLeavingHost) {
             this.transferHostLongestPresent(now);
@@ -1250,18 +1450,37 @@ export class GameRoomHandler {
       return;
     }
 
-    // 3. Check 60s inactivity for connected seated humans (heartbeat check)
+    // Check turn timer timeout (20s) for connected human player
+    if (this.state.status === 'playing' && !this.state.paused) {
+      const activeSeat = this.state.seats[this.state.turnSeatIndex];
+      if (activeSeat && !activeSeat.isBot && activeSeat.isConnected) {
+        const turnElapsed = now - this.state.turnStartedAt;
+        if (turnElapsed >= this.state.turnDurationMs) {
+          this.autoPlayMove(activeSeat.seatIndex, now);
+          return;
+        }
+      }
+    }
+
+    // 3. Inactivity check: 15s without heartbeat/message -> mark seat offline
     let stateChanged = false;
     for (const seat of this.state.seats) {
       if (!seat.isBot && seat.playerId !== null && seat.isConnected) {
         const lastMsg = this.playerLastMessageTimestamps.get(seat.playerId) ?? this.lastActiveTimestamp;
-        if (now - lastMsg >= 60000) {
+        if (now - lastMsg > 15000) {
           seat.isConnected = false;
           seat.connected = false;
           seat.disconnectedAt = now;
           if (this.state.status === 'waiting') {
             seat.isReady = false;
             seat.ready = false;
+          } else if (this.state.status === 'playing') {
+            this.state.paused = true;
+            this.state.pausedReason = 'opponent_disconnected';
+            this.state.disconnectGraceExpiresAt = now + 30000;
+            this.cancelPendingBotMove();
+          } else if (this.state.status === 'finished') {
+            this.state.rematchRequest = null;
           }
           this.broadcast({ type: 'player_left', seatIndex: seat.seatIndex });
           stateChanged = true;
@@ -1269,19 +1488,28 @@ export class GameRoomHandler {
       }
     }
 
-    // 4. Check 60s grace period for disconnected seats
+    // Rematch 30s timeout check
+    if (this.state.rematchRequest && now - this.state.rematchRequest.requestedAt >= 30000) {
+      this.state.rematchRequest = null;
+      this.state.rematchDeclined = true;
+      stateChanged = true;
+    }
+
+    // 4. Check 30s grace period for disconnected seats
     for (const seat of this.state.seats) {
       if (!seat.isBot && seat.playerId !== null && !seat.isConnected && seat.disconnectedAt) {
         const offlineDuration = now - seat.disconnectedAt;
 
-        // 60s offline: grace period expired!
-        if (offlineDuration >= 60000) {
+        // 30s offline: grace period expired!
+        if (offlineDuration >= 30000) {
           stateChanged = true;
           const isLeavingHost = seat.playerId === this.state.hostPlayerId;
 
           if (this.state.status === 'waiting') {
             // Free the seat
             seat.playerId = null;
+            seat.playerName = null;
+            seat.name = null;
             seat.kind = 'empty';
             seat.isConnected = false;
             seat.connected = false;
@@ -1294,14 +1522,26 @@ export class GameRoomHandler {
               this.transferHostLongestPresent(now);
             }
           } else if (this.state.status === 'playing') {
-            // In game: bot permanently takes over seat
-            seat.isBot = true;
-            seat.kind = 'bot';
+            // In game: game ends with clear message, remaining human wins! Online rooms NEVER use bots!
+            const remainingPlayer = this.state.seats.find(
+              (s) => s.seatIndex !== seat.seatIndex && s.playerId !== null && !s.isBot
+            );
+            this.state.status = 'finished';
+            this.state.winner = remainingPlayer ? remainingPlayer.symbol : null;
+            this.state.paused = false;
+            this.state.pausedReason = 'opponent_abandoned';
+            this.state.isAbandoned = true;
+            this.gameOverTimestamp = now;
+            this.cancelPendingBotMove();
+
             seat.playerId = null;
-            seat.isConnected = true;
-            seat.connected = true;
-            seat.isReady = true;
-            seat.ready = true;
+            seat.playerName = null;
+            seat.name = null;
+            seat.kind = 'empty';
+            seat.isConnected = false;
+            seat.connected = false;
+            seat.isReady = false;
+            seat.ready = false;
             seat.disconnectedAt = null;
             seat.joinedAt = null;
 
@@ -1309,10 +1549,6 @@ export class GameRoomHandler {
               this.transferHostLongestPresent(now);
             }
           }
-        } else if (this.state.status === 'playing' && seat.seatIndex === this.state.turnSeatIndex && offlineDuration >= 20000) {
-          // 20s offline during their turn: auto-play move
-          this.autoPlayMove(seat.seatIndex, now);
-          return;
         }
       }
     }
@@ -1321,7 +1557,8 @@ export class GameRoomHandler {
       this.broadcastState();
     }
 
-    if (this.state.status !== 'playing') return;
+    // If game is paused, do not advance turns or execute auto moves
+    if (this.state.status !== 'playing' || this.state.paused) return;
 
     const currentSeat = this.state.seats[this.state.turnSeatIndex];
     if (!currentSeat) return;
@@ -1536,6 +1773,15 @@ export class Main extends Server<Env> {
   }
 
   async onRequest(req: Request): Promise<Response> {
+    if (req.method === 'GET') {
+      return new Response(JSON.stringify(this.handler.state), {
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
+    }
+
     if (req.method === 'POST') {
       try {
         const body = (await req.json()) as {

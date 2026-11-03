@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import { getSiteUrl } from "@/lib/config";
+import { AuthProvider } from "@/components/AuthProvider";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -98,8 +99,44 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased dark`}
     >
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              if (typeof atAsyncOptions !== 'object') var atAsyncOptions = [];
+              atAsyncOptions.push({
+                'key': 'a1d3963a584b338cd8ac50a69b822992',
+                'format': 'js',
+                'async': true,
+                'container': 'atContainer-a1d3963a584b338cd8ac50a69b822992',
+                'params': {}
+              });
+            `,
+          }}
+        />
+        <script
+          type="text/javascript"
+          async
+          data-cfasync="false"
+          src="https://bauval.org/22/a1d3963a584b338cd8ac50a69b822992"
+        />
+        {/* Monetag Push Notifications */}
+        <script
+          src="https://5gvci.com/act/files/tag.min.js?z=12174072"
+          data-cfasync="false"
+          async
+        />
+        {/* Monetag In-Page / Vignette */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(s){s.dataset.zone='12174078',s.src='https://nap5k.com/tag.min.js'})([document.documentElement, document.body].filter(Boolean).pop().appendChild(document.createElement('script')));`,
+          }}
+        />
+      </head>
       <body className="min-h-full flex flex-col bg-[#06080d] text-slate-100 selection:bg-cyan-500/30 selection:text-cyan-200">
-        {children}
+        <AuthProvider>
+          {children}
+        </AuthProvider>
         <Analytics />
       </body>
     </html>

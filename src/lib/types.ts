@@ -23,6 +23,9 @@ export interface PlayerSeat {
   seatIndex: number;
   symbol: MarkSymbol;
   playerId: string | null;
+  playerName?: string | null;
+  name?: string | null;
+  userId?: string | null;
   kind?: 'human' | 'bot' | 'empty';
   isBot: boolean;
   isReady: boolean;
@@ -46,6 +49,8 @@ export interface MoveRecord {
 
 export interface RoomState {
   roomCode: string;
+  gameId?: string | null;
+  isAbandoned?: boolean;
   status: 'uninitialized' | 'waiting' | 'playing' | 'finished';
   phase?: 'uninitialized' | 'waiting' | 'playing' | 'finished';
   seatsCount: 2 | 3 | 4;
@@ -70,6 +75,16 @@ export interface RoomState {
   matchToken?: string;
   history?: MoveRecord[];
   lastMoveCell?: number | null;
+  rematchRequest?: {
+    requestedBy: string;
+    requestedBySeatIndex: number;
+    requestedAt: number;
+    requesterName?: string;
+  } | null;
+  rematchDeclined?: boolean;
+  paused?: boolean;
+  pausedReason?: 'opponent_disconnected' | 'opponent_left' | 'opponent_abandoned' | string | null;
+  disconnectGraceExpiresAt?: number | null;
 }
 
 // Matchmaking config passed when joining a matchmade room
@@ -86,6 +101,9 @@ export const ClientMessageSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('create'),
     playerId: z.string().min(1).max(64),
+    playerName: z.string().max(64).optional(),
+    name: z.string().max(64).optional(),
+    userId: z.string().max(128).optional(),
     seatsCount: z.union([z.literal(2), z.literal(3), z.literal(4)]).optional(),
     matchToken: z.string().optional(),
     matchConfig: MatchConfigSchema.optional(),
@@ -93,6 +111,9 @@ export const ClientMessageSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('join'),
     playerId: z.string().min(1).max(64),
+    playerName: z.string().max(64).optional(),
+    name: z.string().max(64).optional(),
+    userId: z.string().max(128).optional(),
     matchConfig: MatchConfigSchema.optional(),
     matchToken: z.string().optional(),
   }),
@@ -118,6 +139,15 @@ export const ClientMessageSchema = z.discriminatedUnion('type', [
   }),
   z.object({
     type: z.literal('rematch'),
+  }),
+  z.object({
+    type: z.literal('rematch_request'),
+  }),
+  z.object({
+    type: z.literal('rematch_accept'),
+  }),
+  z.object({
+    type: z.literal('rematch_decline'),
   }),
   z.object({
     type: z.literal('leave'),

@@ -19,6 +19,8 @@ import {
   ChevronRight,
   X,
   AlertTriangle,
+  Check,
+  Share2,
 } from 'lucide-react';
 import { getMoveInsights, MoveInsight } from '@/lib/game';
 
@@ -28,6 +30,7 @@ export interface GameOverBannerProps {
   winner: MarkSymbol | null;
   outcome?: GameOutcome;
   mySymbol?: MarkSymbol | null;
+  winnerName?: string;
   isReplay?: boolean;
   replayMove?: MoveRecord | null;
   replayStepIndex?: number;
@@ -40,6 +43,7 @@ export const GameOverBanner: React.FC<GameOverBannerProps> = ({
   winner,
   outcome = 'spectator',
   mySymbol,
+  winnerName,
   isReplay = false,
   replayMove,
   replayStepIndex = 0,
@@ -203,10 +207,18 @@ export const GameOverBanner: React.FC<GameOverBannerProps> = ({
         </div>
         <div className="flex flex-col">
           <span className="text-sm font-black tracking-wider uppercase text-white drop-shadow-[0_0_8px_rgba(255,255,255,0.3)]">
-            {isWinner ? 'VICTORY' : isLoser ? 'DEFEAT' : `${winner} WINS`}
+            {isWinner
+              ? winnerName ? `${winnerName} WINS` : 'VICTORY'
+              : isLoser
+              ? 'DEFEAT'
+              : winnerName ? `${winnerName} WINS` : `${winner} WINS`}
           </span>
           <span className="text-[10px] font-bold tracking-wide uppercase text-slate-400">
-            {isWinner ? 'FLAWLESS GAME' : isLoser ? `WINNER: ${winner}` : 'GAME OVER'}
+            {isWinner
+              ? winnerName ? `VICTORY · ${winnerName}` : 'FLAWLESS GAME'
+              : isLoser
+              ? winnerName ? `WINNER: ${winnerName}` : `WINNER: ${winner}`
+              : 'GAME OVER'}
           </span>
         </div>
       </div>
@@ -262,6 +274,13 @@ export interface GameOverControlsProps {
   onNewMatch?: () => void;
   onHome?: () => void;
   isRematchWaiting?: boolean;
+  rematchPrompt?: {
+    requesterName: string;
+    onAccept: () => void;
+    onDecline: () => void;
+  } | null;
+  isOpponentGone?: boolean;
+  onShare?: () => void;
   onOpenReplay: () => void;
   onCloseReplay: () => void;
   onStepChange: (newStepIndex: number) => void;
@@ -277,6 +296,9 @@ export const GameOverControls: React.FC<GameOverControlsProps> = ({
   onNewMatch,
   onHome,
   isRematchWaiting = false,
+  rematchPrompt,
+  isOpponentGone = false,
+  onShare,
   onOpenReplay,
   onCloseReplay,
   onStepChange,
@@ -430,74 +452,148 @@ export const GameOverControls: React.FC<GameOverControlsProps> = ({
         boxShadow: `0 0 16px ${winnerConfig.glow}`,
       };
 
-  const colCount = onNewMatch ? 'grid-cols-4' : 'grid-cols-3';
+  const colCount = onNewMatch || (isOpponentGone && onShare) ? 'grid-cols-4' : 'grid-cols-3';
 
   return (
-    <div className={`w-full max-w-[360px] mx-auto grid ${colCount} gap-2 px-1 select-none`}>
-      {/* AGAIN / REMATCH */}
-      <motion.button
-        type="button"
-        id="gameover-again-btn"
-        whileHover={{ scale: 1.03 }}
-        whileTap={{ scale: 0.96 }}
-        onClick={onPlayAgain}
-        disabled={isRematchWaiting}
-        className={primaryBtnClass}
-        style={primaryBtnStyle}
-        aria-label="Play Again"
-      >
-        <RotateCcw size={15} strokeWidth={2.5} />
-        <span>{isRematchWaiting ? 'WAIT' : 'AGAIN'}</span>
-      </motion.button>
-
-      {/* REPLAY (Rewind icon) */}
-      <motion.button
-        type="button"
-        id="gameover-replay-btn"
-        whileHover={{ scale: 1.03 }}
-        whileTap={{ scale: 0.96 }}
-        onClick={() => {
-          track('replay_opened');
-          onOpenReplay();
-        }}
-        className="py-3 px-2 rounded-2xl bg-cyan-950/70 border border-cyan-500/40 text-cyan-300 hover:text-white hover:border-cyan-400 font-black text-xs tracking-wider uppercase flex items-center justify-center gap-1.5 cursor-pointer shadow-lg transition-all"
-        aria-label="Replay moves"
-      >
-        <History size={15} strokeWidth={2.5} />
-        <span>REPLAY</span>
-      </motion.button>
-
-      {/* NEW MATCH (if present) */}
-      {onNewMatch && (
-        <motion.button
-          type="button"
-          id="gameover-newmatch-btn"
-          whileHover={{ scale: 1.03 }}
-          whileTap={{ scale: 0.96 }}
-          onClick={onNewMatch}
-          className="py-3 px-2 rounded-2xl bg-slate-900/90 border border-cyan-500/30 text-cyan-300 hover:text-white hover:border-cyan-400 font-black text-xs tracking-wider uppercase flex items-center justify-center gap-1.5 cursor-pointer shadow-lg transition-all"
-          aria-label="New Match"
+    <div className="w-full max-w-[360px] mx-auto flex flex-col gap-2 select-none">
+      {/* Rematch Request Prompt from other player */}
+      {rematchPrompt && (
+        <motion.div
+          initial={{ opacity: 0, y: 5 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="w-full flex items-center justify-between p-2.5 rounded-2xl bg-slate-900/95 border border-cyan-400/50 shadow-[0_0_15px_rgba(0,240,255,0.2)] gap-2"
         >
-          <Compass size={15} strokeWidth={2.5} />
-          <span>MATCH</span>
-        </motion.button>
+          <span className="text-xs font-bold text-slate-200 truncate flex-1">
+            <span className="text-cyan-300 font-black">{rematchPrompt.requesterName}</span> wants a rematch
+          </span>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              id="rematch-accept-btn"
+              onClick={rematchPrompt.onAccept}
+              className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-black text-xs uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all shadow-md active:scale-95"
+            >
+              <Check size={14} strokeWidth={3} />
+              <span>Accept</span>
+            </button>
+            <button
+              type="button"
+              id="rematch-decline-btn"
+              onClick={rematchPrompt.onDecline}
+              className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-500/20 text-slate-300 hover:text-rose-400 font-bold text-xs uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all border border-white/10 active:scale-95"
+            >
+              <X size={14} strokeWidth={2.5} />
+              <span>Decline</span>
+            </button>
+          </div>
+        </motion.div>
       )}
 
-      {/* HOME (if present) */}
-      {onHome && (
+      <div className={`w-full grid ${colCount} gap-2 px-1`}>
+        {/* AGAIN / REMATCH */}
+        {isOpponentGone ? (
+          <motion.button
+            type="button"
+            id="gameover-again-btn"
+            disabled
+            className="py-3 px-2 rounded-2xl font-black text-[11px] tracking-wider uppercase bg-slate-800/50 border border-white/10 text-slate-500 cursor-not-allowed flex items-center justify-center gap-1 select-none"
+            aria-label="Waiting for opponent"
+          >
+            <RotateCcw size={14} strokeWidth={2.5} />
+            <span className="truncate">Waiting...</span>
+          </motion.button>
+        ) : isRematchWaiting ? (
+          <motion.button
+            type="button"
+            id="gameover-again-btn"
+            disabled
+            className="py-3 px-2 rounded-2xl font-black text-[11px] tracking-wider uppercase bg-slate-800/80 border border-cyan-400/40 text-cyan-300 cursor-not-allowed flex items-center justify-center gap-1 shadow-md"
+            aria-label="Waiting for opponent"
+          >
+            <RotateCcw size={14} strokeWidth={2.5} className="animate-spin" />
+            <span className="truncate">Waiting...</span>
+          </motion.button>
+        ) : (
+          <motion.button
+            type="button"
+            id="gameover-again-btn"
+            whileHover={{ scale: 1.03 }}
+            whileTap={{ scale: 0.96 }}
+            onClick={onPlayAgain}
+            className={primaryBtnClass}
+            style={primaryBtnStyle}
+            aria-label="Play Again"
+          >
+            <RotateCcw size={15} strokeWidth={2.5} />
+            <span>AGAIN</span>
+          </motion.button>
+        )}
+
+        {/* REPLAY (Rewind icon) */}
         <motion.button
           type="button"
-          id="gameover-home-btn"
+          id="gameover-replay-btn"
           whileHover={{ scale: 1.03 }}
           whileTap={{ scale: 0.96 }}
-          onClick={onHome}
-          className="py-3 px-2 rounded-2xl bg-slate-900/90 border border-white/15 text-slate-300 hover:text-white hover:border-white/30 font-black text-xs tracking-wider uppercase flex items-center justify-center gap-1.5 cursor-pointer shadow-lg transition-all"
-          aria-label="Home"
+          onClick={() => {
+            track('replay_opened');
+            onOpenReplay();
+          }}
+          className="py-3 px-2 rounded-2xl bg-cyan-950/70 border border-cyan-500/40 text-cyan-300 hover:text-white hover:border-cyan-400 font-black text-xs tracking-wider uppercase flex items-center justify-center gap-1.5 cursor-pointer shadow-lg transition-all"
+          aria-label="Replay moves"
         >
-          <Home size={15} strokeWidth={2.5} />
-          <span>HOME</span>
+          <History size={15} strokeWidth={2.5} />
+          <span>REPLAY</span>
         </motion.button>
-      )}
+
+        {/* NEW MATCH (if present) */}
+        {onNewMatch && (
+          <motion.button
+            type="button"
+            id="gameover-newmatch-btn"
+            whileHover={{ scale: 1.03 }}
+            whileTap={{ scale: 0.96 }}
+            onClick={onNewMatch}
+            className="py-3 px-2 rounded-2xl bg-slate-900/90 border border-cyan-500/30 text-cyan-300 hover:text-white hover:border-cyan-400 font-black text-xs tracking-wider uppercase flex items-center justify-center gap-1.5 cursor-pointer shadow-lg transition-all"
+            aria-label="New Match"
+          >
+            <Compass size={15} strokeWidth={2.5} />
+            <span>MATCH</span>
+          </motion.button>
+        )}
+
+        {/* COPY INVITE LINK (when opponent is gone so remaining player can invite someone else) */}
+        {!onNewMatch && isOpponentGone && onShare && (
+          <motion.button
+            type="button"
+            id="gameover-share-btn"
+            whileHover={{ scale: 1.03 }}
+            whileTap={{ scale: 0.96 }}
+            onClick={onShare}
+            className="py-3 px-2 rounded-2xl bg-slate-900/90 border border-cyan-500/30 text-cyan-300 hover:text-white hover:border-cyan-400 font-black text-xs tracking-wider uppercase flex items-center justify-center gap-1.5 cursor-pointer shadow-lg transition-all"
+            aria-label="Copy invite link"
+          >
+            <Share2 size={15} strokeWidth={2.5} />
+            <span>INVITE</span>
+          </motion.button>
+        )}
+
+        {/* HOME / LEAVE ROOM */}
+        {onHome && (
+          <motion.button
+            type="button"
+            id="gameover-home-btn"
+            whileHover={{ scale: 1.03 }}
+            whileTap={{ scale: 0.96 }}
+            onClick={onHome}
+            className="py-3 px-2 rounded-2xl bg-slate-900/90 border border-white/15 text-slate-300 hover:text-white hover:border-white/30 font-black text-xs tracking-wider uppercase flex items-center justify-center gap-1.5 cursor-pointer shadow-lg transition-all"
+            aria-label={isOpponentGone ? 'Leave Room' : 'Home'}
+          >
+            <Home size={15} strokeWidth={2.5} />
+            <span>{isOpponentGone ? 'LEAVE' : 'HOME'}</span>
+          </motion.button>
+        )}
+      </div>
     </div>
   );
 };

@@ -18,12 +18,12 @@ import Link from 'next/link';
 import PartySocket from 'partysocket';
 import { getOrCreatePlayerId, getPlayerName } from '@/lib/player';
 import { getRealtimeConfig } from '@/lib/config';
-import { track } from '@/lib/analytics';
+import { track, trackFirstMove } from '@/lib/analytics';
 import { LobbyServerMessage, MarkSymbol } from '@/lib/types';
 import { GameBoard } from '@/components/GameBoard';
 import { TopControls } from '@/components/TopControls';
 import { GameOverBanner, GameOverControls } from '@/components/GameOverExperience';
-import { FirstTimeHint } from '@/components/FirstTimeHint';
+import { FirstTimeHint, isTutorialCompleted, markTutorialCompleted } from '@/components/FirstTimeHint';
 import { SeoSection } from '@/components/SeoSection';
 import { MatchmakingModal, MatchFoundData } from '@/components/MatchmakingModal';
 import { Users, Share2, Activity, RotateCcw, Bot, Award, Trophy } from 'lucide-react';
@@ -41,15 +41,21 @@ import {
 import { ProfileModal } from '@/components/ProfileModal';
 import { RankDeltaIndicator } from '@/components/RankDeltaIndicator';
 import { BadgeToast, BadgeToastItem } from '@/components/BadgeToast';
+import { HomeLeaderboard } from '@/components/HomeLeaderboard';
+import { AdsterraBanner } from '@/components/AdsterraBanner';
+import { SiteFooter } from '@/components/SiteFooter';
+import { AuthButton } from '@/components/AuthButton';
+import { useSession } from 'next-auth/react';
 
 function HomeContent() {
+  const { data: session } = useSession();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [joinInput, setJoinInput] = useState('');
   const [gameState, setGameState] = useState<GameState>(() => createInitialState('X'));
   const [mode, setMode] = useState<'bot' | 'pvp'>(() => searchParams?.get('mode') === 'pvp' ? 'pvp' : 'bot');
   const [botDifficulty, setBotDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
-  const [soundEnabled, setSoundEnabled] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(true);
   const [score, setScore] = useState<{ X: number; O: number }>({ X: 0, O: 0 });
   const [streak, setStreak] = useState<number>(0);
   const [lastWinner, setLastWinner] = useState<Player | null>(null);
@@ -61,6 +67,69 @@ function HomeContent() {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [lastRankDelta, setLastRankDelta] = useState<number | null>(null);
   const [badgeToasts, setBadgeToasts] = useState<BadgeToastItem[]>([]);
+
+  // First-Time Tutorial State
+  const [isTutorialOpen, setIsTutorialOpen] = useState(false);
+  const [tutorialStep, setTutorialStep] = useState(0);
+  const tutorialStartTimeRef = useRef<number | null>(null);
+  const gameStartTimeRef = useRef<number | null>(null);
+
+  // Check first-time player on mount (bot mode on Easy for first game)
+  useEffect(() => {
+    try {
+      const done = isTutorialCompleted();
+      if (!done) {
+        setMode('bot');
+        setBotDifficulty('easy');
+        setIsTutorialOpen(true);
+        setTutorialStep(0);
+        tutorialStartTimeRef.current = Date.now();
+      }
+    } catch {
+      // Storage access fallback
+    }
+    setSoundEnabled(soundManager.isEnabled());
+  }, []);
+
+  const handleTutorialSkip = useCallback(() => {
+    try {
+      if (tutorialStartTimeRef.current) {
+        const spent = Math.round((Date.now() - tutorialStartTimeRef.current) / 1000);
+        if (!isNaN(spent) && spent >= 0) {
+          track('tutorial_skipped', { seconds_spent: spent });
+        }
+        tutorialStartTimeRef.current = null;
+      }
+    } catch { }
+    markTutorialCompleted();
+    setIsTutorialOpen(false);
+  }, []);
+
+  const handleTutorialNext = useCallback(() => {
+    setTutorialStep((prev) => {
+      if (prev >= 4) {
+        try {
+          if (tutorialStartTimeRef.current) {
+            const spent = Math.round((Date.now() - tutorialStartTimeRef.current) / 1000);
+            if (!isNaN(spent) && spent >= 0) {
+              track('tutorial_completed', { seconds_spent: spent });
+            }
+            tutorialStartTimeRef.current = null;
+          }
+        } catch { }
+        markTutorialCompleted();
+        setIsTutorialOpen(false);
+        return prev;
+      }
+      return prev + 1;
+    });
+  }, []);
+
+  const handleOpenTutorial = useCallback(() => {
+    setTutorialStep(0);
+    setIsTutorialOpen(true);
+    tutorialStartTimeRef.current = Date.now();
+  }, []);
 
   const currentRankInfo = useMemo(() => getRank(progression.rankPoints), [progression.rankPoints]);
 
@@ -216,6 +285,7 @@ function HomeContent() {
 
   // Handle start matchmaking
   const handleStartSearch = useCallback((targetCount: 2 | 3 | 4) => {
+    setIsTutorialOpen(false);
     if (!getRealtimeConfig()) {
       setServerBusy(true);
       return;
@@ -337,6 +407,7 @@ function HomeContent() {
       track('rematch_clicked', { mode: 'offline' });
     }
     hasTrackedOfflineGameStartedRef.current = false;
+    gameStartTimeRef.current = null;
     cancelBotScheduler();
     setIsAnimating(false);
     isInputLockedRef.current = false;
@@ -349,6 +420,8 @@ function HomeContent() {
   // Mode change
   const handleModeChange = (newMode: 'bot' | 'pvp') => {
     cancelBotScheduler();
+    hasTrackedOfflineGameStartedRef.current = false;
+    gameStartTimeRef.current = null;
     setMode(newMode);
     setScore({ X: 0, O: 0 });
     setStreak(0);
@@ -403,27 +476,29 @@ function HomeContent() {
           track('streak_reached', { n: res.newStreakReached });
         }
 
-        // Record global Elo game result
-        try {
-          const playerId = getOrCreatePlayerId();
-          const playerName = getPlayerName() || undefined;
-          const oppType = mode === 'bot' ? `bot-${botDifficulty}` : 'human';
-          fetch('/api/leaderboard/record', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              playerId,
-              playerName,
-              opponentId: oppType,
-              result: humanWon ? 'win' : 'loss',
-            }),
-          }).catch(() => {});
-        } catch {}
+        // Games against the bot must NEVER change any rating or create a leaderboard entry
+        // Only signed-in users can appear on the leaderboard or earn Elo
+        if (mode !== 'bot' && session?.user?.id) {
+          try {
+            const playerId = session.user.id;
+            const playerName = getPlayerName(session.user.name);
+            fetch('/api/leaderboard/record', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                playerId,
+                playerName,
+                opponentId: 'human',
+                result: humanWon ? 'win' : 'loss',
+              }),
+            }).catch(() => { });
+          } catch { }
+        }
 
         return res.nextData;
       });
     },
-    [mode, botDifficulty]
+    [mode, botDifficulty, session]
   );
 
   // Process a move
@@ -460,11 +535,19 @@ function HomeContent() {
       // Win handling
       if (nextState.winner) {
         const winner = nextState.winner;
+        let durationSeconds: number | undefined;
+        if (gameStartTimeRef.current) {
+          const diff = Math.round((Date.now() - gameStartTimeRef.current) / 1000);
+          if (!isNaN(diff) && diff >= 0) {
+            durationSeconds = diff;
+          }
+        }
         track('game_finished', {
           players: 2,
           bots: mode === 'bot' ? 1 : 0,
           turns: nextState.moveCount,
           mode: 'offline',
+          ...(durationSeconds !== undefined ? { duration_seconds: durationSeconds } : {}),
         });
         setScore((prev) => ({
           ...prev,
@@ -494,12 +577,29 @@ function HomeContent() {
     if (isInputLockedRef.current || isAnimating || isBotThinking) return;
     if (mode === 'bot' && gameState.turn !== 'X') return;
 
+    trackFirstMove(mode === 'bot' ? 'bot' : 'pass');
+
+    if (isTutorialOpen) {
+      try {
+        if (tutorialStartTimeRef.current) {
+          const spent = Math.round((Date.now() - tutorialStartTimeRef.current) / 1000);
+          if (!isNaN(spent) && spent >= 0) {
+            track('tutorial_completed', { seconds_spent: spent });
+          }
+          tutorialStartTimeRef.current = null;
+        }
+      } catch { }
+      markTutorialCompleted();
+      setIsTutorialOpen(false);
+    }
+
     // Lock input against double taps
     isInputLockedRef.current = true;
     setIsAnimating(true);
 
     if (gameState.moveCount === 0 && !hasTrackedOfflineGameStartedRef.current) {
       hasTrackedOfflineGameStartedRef.current = true;
+      gameStartTimeRef.current = Date.now();
       track('game_started', {
         players: 2,
         bots: mode === 'bot' ? 1 : 0,
@@ -592,192 +692,225 @@ function HomeContent() {
 
   return (
     <main className="min-h-screen w-full flex flex-col items-center justify-between px-3 py-4 sm:py-6 overflow-x-hidden">
-      {/* Visual First-Time Tutorial (No words, localStorage cached) */}
-      <FirstTimeHint />
+      {/* First-Time Player Guided Tutorial */}
+      <FirstTimeHint
+        isOpen={isTutorialOpen && !isSearching && !matchResult}
+        step={tutorialStep}
+        onNext={handleTutorialNext}
+        onSkip={handleTutorialSkip}
+      />
 
-      {/* Main Game Screen */}
-      <div className="w-full max-w-md flex flex-col items-center gap-3 sm:gap-4 my-auto">
-        {/* Minimalist Logo / Title + Profile Icon + Online Quick Match */}
-        <header className="w-full max-w-[360px] flex items-center justify-between px-1 select-none">
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl sm:text-2xl font-black tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-white to-pink-500 drop-shadow-[0_0_10px_rgba(0,240,255,0.4)]">
-              VANISH XO
-            </h1>
-            <button
-              type="button"
-              id="header-profile-btn"
-              aria-label="Profile and Badges"
-              onClick={() => setIsProfileOpen(true)}
-              className="w-7 h-7 rounded-xl bg-slate-900/90 border flex items-center justify-center transition-all hover:scale-105 active:scale-95 cursor-pointer shadow-sm"
-              style={{
-                borderColor: `${currentRankInfo.color}66`,
-                boxShadow: `0 0 10px ${currentRankInfo.glow}`,
-              }}
-            >
-              <Award size={14} style={{ color: currentRankInfo.color }} />
-            </button>
-            <Link
-              href="/leaderboard"
-              id="header-leaderboard-btn"
-              aria-label="Global Leaderboard"
-              className="w-7 h-7 rounded-xl bg-slate-900/90 border border-amber-500/40 text-amber-400 hover:text-amber-300 flex items-center justify-center transition-all hover:scale-105 active:scale-95 cursor-pointer shadow-[0_0_10px_rgba(245,158,11,0.2)]"
-            >
-              <Trophy size={14} />
-            </Link>
+      {/* Main Game Screen & Sidebar Container */}
+      <div className="w-full max-w-7xl flex flex-col xl:grid xl:grid-cols-[1fr_auto_1fr] items-center xl:items-start justify-center gap-6 xl:gap-8 my-auto">
+        {/* Main Game Card (Centered on all screen sizes) */}
+        <div className="w-full max-w-md flex flex-col items-center gap-2.5 sm:gap-3 xl:col-start-2 xl:row-start-1 xl:justify-self-center">
+          {/* Top Auth Bar */}
+          <div className="w-full max-w-[360px] flex items-center justify-end px-1">
+            <AuthButton />
           </div>
-          <div className="flex items-center gap-1 bg-slate-900/80 p-0.5 rounded-xl border border-white/10 backdrop-blur-md">
-            {([2, 3, 4] as const).map((count) => (
+
+          {/* Minimalist Logo / Title + Profile Icon + Online Quick Match */}
+          <header className="w-full max-w-[360px] flex items-center justify-between px-1 select-none">
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl sm:text-2xl font-black tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-white to-pink-500 drop-shadow-[0_0_10px_rgba(0,240,255,0.4)]">
+                VANISH XO
+              </h1>
               <button
-                key={count}
                 type="button"
-                id={`play-online-${count}p-btn`}
-                aria-label={`Quick match ${count} players`}
-                onClick={() => handleStartSearch(count)}
-                className="min-h-[44px] min-w-[44px] px-2 rounded-lg bg-slate-800/80 hover:bg-slate-700/80 border border-white/5 hover:border-cyan-500/40 text-xs font-black flex items-center justify-center gap-1 transition-all active:scale-95 cursor-pointer shadow-sm group"
+                id="header-profile-btn"
+                aria-label="Profile and Badges"
+                onClick={() => setIsProfileOpen(true)}
+                className="w-7 h-7 rounded-xl bg-slate-900/90 border flex items-center justify-center transition-all hover:scale-105 active:scale-95 cursor-pointer shadow-sm"
+                style={{
+                  borderColor: `${currentRankInfo.color}66`,
+                  boxShadow: `0 0 10px ${currentRankInfo.glow}`,
+                }}
               >
-                <Users size={12} className="text-slate-400 group-hover:text-cyan-400 transition-colors" />
-                <span className="text-slate-200 group-hover:text-white transition-colors">{count}P</span>
+                <Award size={14} style={{ color: currentRankInfo.color }} />
               </button>
-            ))}
-          </div>
-        </header>
+              <Link
+                href="/leaderboard"
+                id="header-leaderboard-btn"
+                aria-label="Global Leaderboard"
+                className="w-7 h-7 rounded-xl bg-slate-900/90 border border-amber-500/40 text-amber-400 hover:text-amber-300 flex items-center justify-center transition-all hover:scale-105 active:scale-95 cursor-pointer shadow-[0_0_10px_rgba(245,158,11,0.2)]"
+              >
+                <Trophy size={14} />
+              </Link>
+            </div>
+            <div className="flex items-center gap-1 bg-slate-900/80 p-0.5 rounded-xl border border-white/10 backdrop-blur-md">
+              {([2, 3, 4] as const).map((count) => (
+                <button
+                  key={count}
+                  type="button"
+                  id={`play-online-${count}p-btn`}
+                  aria-label={`Quick match ${count} players`}
+                  onClick={() => handleStartSearch(count)}
+                  className="min-h-[44px] min-w-[44px] px-2 rounded-lg bg-slate-800/80 hover:bg-slate-700/80 border border-white/5 hover:border-cyan-500/40 text-xs font-black flex items-center justify-center gap-1 transition-all active:scale-95 cursor-pointer shadow-sm group"
+                >
+                  <Users size={12} className="text-slate-400 group-hover:text-cyan-400 transition-colors" />
+                  <span className="text-slate-200 group-hover:text-white transition-colors">{count}P</span>
+                </button>
+              ))}
+            </div>
+          </header>
 
-        {/* Game Over Banner (ABOVE the board, never covering it) */}
-        {gameState.winner !== null && (
-          <GameOverBanner
-            winner={gameState.winner}
-            outcome={mode === 'bot' ? (gameState.winner === 'X' ? 'win' : 'lose') : 'spectator'}
-            mySymbol={mode === 'bot' ? 'X' : null}
-            isReplay={isReplay}
-            replayMove={currentReplayState?.lastMove}
-            replayStepIndex={replayStepIndex}
-            totalReplaySteps={gameState.history?.length || 0}
-            isReplayTrap={currentReplayInsight?.hasWarning}
-            hadVanish={Boolean(gameState.lastVanished)}
-          />
-        )}
+          {/* Game Over Banner (ABOVE the board, never covering it) */}
+          {gameState.winner !== null && (
+            <GameOverBanner
+              winner={gameState.winner}
+              outcome={mode === 'bot' ? (gameState.winner === 'X' ? 'win' : 'lose') : 'spectator'}
+              mySymbol={mode === 'bot' ? 'X' : null}
+              winnerName={
+                gameState.winner === 'X'
+                  ? getPlayerName(session?.user)
+                  : mode === 'bot'
+                    ? 'Bot'
+                    : 'Player 2'
+              }
+              isReplay={isReplay}
+              replayMove={currentReplayState?.lastMove}
+              replayStepIndex={replayStepIndex}
+              totalReplaySteps={gameState.history?.length || 0}
+              isReplayTrap={currentReplayInsight?.hasWarning}
+              hadVanish={Boolean(gameState.lastVanished)}
+            />
+          )}
 
-        {/* Top Controls & Offline Player Badges (Hidden when in Replay mode for clarity) */}
-        {!isReplay && (
-          <TopControls
-            mode={mode}
-            onModeChange={handleModeChange}
-            botDifficulty={botDifficulty}
-            onDifficultyChange={handleDifficultyChange}
-            soundEnabled={soundEnabled}
-            onToggleSound={handleToggleSound}
-            onRestart={handleRestart}
+          {/* Top Controls & Offline Player Badges (Hidden when in Replay mode for clarity) */}
+          {!isReplay && (
+            <TopControls
+              mode={mode}
+              onModeChange={handleModeChange}
+              botDifficulty={botDifficulty}
+              onDifficultyChange={handleDifficultyChange}
+              soundEnabled={soundEnabled}
+              onToggleSound={handleToggleSound}
+              onRestart={handleRestart}
+              state={gameState}
+              score={score}
+              streak={streak}
+              onOpenProfile={() => setIsProfileOpen(true)}
+              rankTierColor={currentRankInfo.color}
+              isBotThinking={isBotThinking}
+              onOpenTutorial={handleOpenTutorial}
+            />
+          )}
+
+          {/* Interactive Board at FULL size (dimmed marks, bright ring, ghost vanish, 1s sequence) */}
+          <GameBoard
             state={gameState}
-            score={score}
-            streak={streak}
-            onOpenProfile={() => setIsProfileOpen(true)}
-            rankTierColor={currentRankInfo.color}
-            isBotThinking={isBotThinking}
-          />
-        )}
-
-        {/* Interactive Board at FULL size (dimmed marks, bright ring, ghost vanish, 1s sequence) */}
-        <GameBoard
-          state={gameState}
-          onCellClick={handleCellClick}
-          disabled={isBotThinking || isAnimating || (mode === 'bot' && gameState.turn !== 'X') || isReplay}
-          vanishedAnim={vanishedAnim}
-          onVanishedAnimComplete={() => setVanishedAnim(null)}
-          boardOverride={isReplay && currentReplayState ? currentReplayState.board : undefined}
-          winningLineOverride={isReplay && currentReplayState ? currentReplayState.winningLine : undefined}
-          winnerOverride={isReplay && currentReplayState ? currentReplayState.winner : undefined}
-          lastMoveCell={isReplay && currentReplayState ? currentReplayState.lastMove.cell : gameState.lastMoveCell}
-          ghostVanish={
-            isReplay && currentReplayState
-              ? currentReplayState.lastMove.vanished
-              : gameState.lastVanished
-              ? { symbol: gameState.lastVanished.player as MarkSymbol, cell: gameState.lastVanished.cell }
-              : null
-          }
-          isReplay={isReplay}
-          isGameOver={gameState.winner !== null}
-        />
-
-        {/* Rank Change Animated Delta under the board */}
-        {gameState.winner !== null && lastRankDelta !== null && (
-          <RankDeltaIndicator
-            delta={lastRankDelta}
-            tierColor={currentRankInfo.color}
-          />
-        )}
-
-        {/* Game Over Controls (BELOW the board: Again, Replay, Home OR step controls) */}
-        {gameState.winner !== null ? (
-          <GameOverControls
-            winner={gameState.winner}
-            outcome={mode === 'bot' ? (gameState.winner === 'X' ? 'win' : 'lose') : 'spectator'}
-            history={gameState.history || []}
+            onCellClick={handleCellClick}
+            disabled={isBotThinking || isAnimating || (mode === 'bot' && gameState.turn !== 'X') || isReplay}
+            vanishedAnim={vanishedAnim}
+            onVanishedAnimComplete={() => setVanishedAnim(null)}
+            boardOverride={isReplay && currentReplayState ? currentReplayState.board : undefined}
+            winningLineOverride={isReplay && currentReplayState ? currentReplayState.winningLine : undefined}
+            winnerOverride={isReplay && currentReplayState ? currentReplayState.winner : undefined}
+            lastMoveCell={isReplay && currentReplayState ? currentReplayState.lastMove.cell : gameState.lastMoveCell}
+            ghostVanish={
+              isReplay && currentReplayState
+                ? currentReplayState.lastMove.vanished
+                : gameState.lastVanished
+                  ? { symbol: gameState.lastVanished.player as MarkSymbol, cell: gameState.lastVanished.cell }
+                  : null
+            }
             isReplay={isReplay}
-            replayStepIndex={replayStepIndex}
-            onPlayAgain={handleRestart}
-            onHome={() => {
-              handleRestart();
-              track('home_clicked', { from: 'gameover' });
-            }}
-            onOpenReplay={() => {
-              setIsReplay(true);
-              setReplayStepIndex(Math.max(0, (gameState.history?.length || 1) - 1));
-            }}
-            onCloseReplay={() => {
-              setIsReplay(false);
-            }}
-            onStepChange={(newStep) => {
-              setReplayStepIndex(newStep);
-            }}
+            isGameOver={gameState.winner !== null}
+            tutorialStep={isTutorialOpen ? tutorialStep : null}
           />
-        ) : (
-          /* Invite & Quick Room Code Join during active play */
-          <div className="w-full max-w-[360px] flex items-center gap-2 px-1">
-            {/* Invite Button: creates private room */}
-            <button
-              type="button"
-              id="invite-create-btn"
-              onClick={() => {
-                const code = generateRoomCode();
-                router.push(`/room/${code}?action=create`);
-              }}
-              className="px-3.5 py-2 rounded-xl bg-slate-900/80 border border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/20 text-xs font-black uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer shadow-md active:scale-95"
-            >
-              <Share2 size={13} />
-              <span>INVITE</span>
-            </button>
 
-            {/* Quick Room Code Join Form */}
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                const code = joinInput.trim().toUpperCase();
-                if (code.length === 5) {
-                  router.push(`/room/${code}`);
-                }
+          {/* Rank Change Animated Delta under the board */}
+          {gameState.winner !== null && lastRankDelta !== null && (
+            <RankDeltaIndicator
+              delta={lastRankDelta}
+              tierColor={currentRankInfo.color}
+            />
+          )}
+
+          {/* Game Over Controls (BELOW the board: Again, Replay, Home OR step controls) */}
+          {gameState.winner !== null ? (
+            <GameOverControls
+              winner={gameState.winner}
+              outcome={mode === 'bot' ? (gameState.winner === 'X' ? 'win' : 'lose') : 'spectator'}
+              history={gameState.history || []}
+              isReplay={isReplay}
+              replayStepIndex={replayStepIndex}
+              onPlayAgain={handleRestart}
+              onHome={() => {
+                handleRestart();
+                track('home_clicked', { from: 'gameover' });
               }}
-              className="flex-1 flex items-center gap-1.5"
-            >
-              <input
-                type="text"
-                id="join-room-input"
-                maxLength={5}
-                placeholder="ROOM CODE"
-                value={joinInput}
-                onChange={(e) => setJoinInput(e.target.value.toUpperCase())}
-                className="flex-1 bg-slate-900/60 border border-white/10 focus:border-cyan-400 rounded-xl px-2.5 py-2 text-center font-mono text-xs tracking-widest text-cyan-300 placeholder:text-slate-600 focus:outline-none uppercase transition-colors"
-              />
+              onOpenReplay={() => {
+                setIsReplay(true);
+                setReplayStepIndex(Math.max(0, (gameState.history?.length || 1) - 1));
+              }}
+              onCloseReplay={() => {
+                setIsReplay(false);
+              }}
+              onStepChange={(newStep) => {
+                setReplayStepIndex(newStep);
+              }}
+            />
+          ) : (
+            /* Invite & Quick Room Code Join during active play */
+            <div className="w-full max-w-[360px] flex items-center gap-2 px-1">
+              {/* Invite Button: creates private room */}
               <button
-                type="submit"
-                id="join-room-btn"
-                disabled={joinInput.trim().length !== 5}
-                className="px-3 py-2 bg-cyan-400 text-black font-black text-xs rounded-xl uppercase tracking-wider disabled:opacity-25 disabled:cursor-not-allowed hover:bg-cyan-300 transition-all cursor-pointer shadow-md"
+                type="button"
+                id="invite-create-btn"
+                onClick={() => {
+                  const code = generateRoomCode();
+                  router.push(`/room/${code}?action=create`);
+                }}
+                className="px-3.5 py-2 rounded-xl bg-slate-900/80 border border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/20 text-xs font-black uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer shadow-md active:scale-95"
               >
-                JOIN
+                <Share2 size={13} />
+                <span>INVITE</span>
               </button>
-            </form>
-          </div>
-        )}
+
+              {/* Quick Room Code Join Form */}
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const code = joinInput.trim().toUpperCase();
+                  if (code.length === 5) {
+                    router.push(`/room/${code}`);
+                  }
+                }}
+                className="flex-1 flex items-center gap-1.5"
+              >
+                <input
+                  type="text"
+                  id="join-room-input"
+                  maxLength={5}
+                  placeholder="ROOM CODE"
+                  value={joinInput}
+                  onChange={(e) => setJoinInput(e.target.value.toUpperCase())}
+                  className="flex-1 bg-slate-900/60 border border-white/10 focus:border-cyan-400 rounded-xl px-2.5 py-2 text-center font-mono text-xs tracking-widest text-cyan-300 placeholder:text-slate-600 focus:outline-none uppercase transition-colors"
+                />
+                <button
+                  type="submit"
+                  id="join-room-btn"
+                  disabled={joinInput.trim().length !== 5}
+                  className="px-3 py-2 bg-cyan-400 text-black font-black text-xs rounded-xl uppercase tracking-wider disabled:opacity-25 disabled:cursor-not-allowed hover:bg-cyan-300 transition-all cursor-pointer shadow-md"
+                >
+                  JOIN
+                </button>
+              </form>
+            </div>
+          )}
+
+        </div>
+
+        {/* Public Top 5 Leaderboard (Below game on mobile/tablet, left column on desktop) */}
+        <aside className="w-full max-w-[360px] xl:max-w-[320px] xl:col-start-1 xl:row-start-1 xl:justify-self-end shrink-0">
+          <HomeLeaderboard />
+        </aside>
+
+        {/* Right column on desktop (or below leaderboard on mobile): 300x250 Adsterra Banner */}
+        <aside className="w-full max-w-[360px] xl:max-w-[320px] xl:col-start-3 xl:row-start-1 xl:justify-self-start shrink-0 flex flex-col items-center">
+          <AdsterraBanner />
+        </aside>
       </div>
 
       {/* Server Busy Modal */}
@@ -847,6 +980,9 @@ function HomeContent() {
 
       {/* Below the Fold SEO Content for Google Search */}
       <SeoSection />
+
+      {/* Footer Navigation Links */}
+      <SiteFooter />
     </main>
   );
 }

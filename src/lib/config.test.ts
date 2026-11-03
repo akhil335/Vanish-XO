@@ -79,7 +79,7 @@ describe('Vanish XO - Configuration and Host Resolution', () => {
     it('returns null and logs console.error when missing in production', () => {
       delete process.env.NEXT_PUBLIC_REALTIME_HOST;
       vi.stubEnv('NODE_ENV', 'production');
-      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => { });
 
       const config = getRealtimeConfig();
       expect(config).toBeNull();
@@ -90,8 +90,8 @@ describe('Vanish XO - Configuration and Host Resolution', () => {
 
   describe('getSiteUrl', () => {
     it('returns configured site URL without trailing slash', () => {
-      process.env.NEXT_PUBLIC_SITE_URL = 'https://vanish-xo.vercel.app/';
-      expect(getSiteUrl()).toBe('https://vanish-xo.vercel.app');
+      process.env.NEXT_PUBLIC_SITE_URL = 'https://vanishxo.online/';
+      expect(getSiteUrl()).toBe('https://vanishxo.online');
     });
 
     it('falls back to http://localhost:3000 if not set', () => {

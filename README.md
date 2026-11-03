@@ -107,7 +107,7 @@ See `.env.example` for the environment template.
 | Variable | Description | Default (Local) | Example (Production) |
 | :--- | :--- | :--- | :--- |
 | `NEXT_PUBLIC_REALTIME_HOST` | Bare hostname of realtime server (no protocol, port, or trailing slash) | `localhost:8787` (development only) | `vanish-xo.<your-subdomain>.workers.dev` |
-| `NEXT_PUBLIC_SITE_URL` | Canonical URL of the web frontend (used for Open Graph, invite links, sitemap) | `http://localhost:3000` | `https://vanish-xo.vercel.app` |
+| `NEXT_PUBLIC_SITE_URL` | Canonical URL of the web frontend (used for Open Graph, invite links, sitemap) | `http://localhost:3000` | `https://vanish-xo.vercel.app` | `https://vanishxo.online/`
 
 ---
 
@@ -131,7 +131,7 @@ Follow these steps to deploy Vanish XO to production:
 3. **Set Environment Variables in Vercel**:
    Import your repository into [Vercel](https://vercel.com) and set the environment variables in **Project Settings > Environment Variables**:
    - `NEXT_PUBLIC_REALTIME_HOST`: Your bare host only (e.g., `vanish-xo.<your-subdomain>.workers.dev`), omitting `https://`, ports, or trailing slashes.
-   - `NEXT_PUBLIC_SITE_URL`: Your web domain with protocol (e.g., `https://vanish-xo.vercel.app`).
+   - `NEXT_PUBLIC_SITE_URL`: Your web domain with protocol (e.g., `https://vanishxo.online/`).
 
 4. **Redeploy Vercel**:
    Next.js bakes `NEXT_PUBLIC_*` variables into the static bundle at **build time**. If setting or modifying these variables, trigger a redeploy in Vercel (via **Deployments > ... > Redeploy**) so the build bakes in the new values.

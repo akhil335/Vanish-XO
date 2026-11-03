@@ -331,11 +331,13 @@ describe('Vanish XO - Multi-Client Integration Tests (PartyServer on Cloudflare 
     expect(hostStates[hostStates.length - 1].board[1]).toBe('O');
     expect(hostStates[hostStates.length - 1].board[2]).toBe('▲');
 
-    // 8. Host leaves mid-game -> Seat 0 taken over by Bot, host transferred to Guest 1
+    // 8. Host leaves mid-game -> Game ends cleanly, NO bot takeover in online rooms
     tabHost.send(JSON.stringify({ type: 'leave' }));
     const afterLeave = guest1States[guest1States.length - 1];
 
-    expect(afterLeave.seats[0].isBot).toBe(true);
+    expect(afterLeave.seats[0].isBot).toBe(false);
+    expect(afterLeave.seats[0].playerId).toBeNull();
+    expect(afterLeave.status).toBe('finished');
     expect(afterLeave.hostPlayerId).toBe('live_guest1');
 
     tabHost.close();

@@ -3,7 +3,9 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Trophy, Medal, RotateCcw, User, Shield, Flame } from 'lucide-react';
-import { getOrCreatePlayerId, getPlayerName } from '@/lib/player';
+import { useSession, signIn } from 'next-auth/react';
+import { getPlayerName } from '@/lib/player';
+import { SiteFooter } from '@/components/SiteFooter';
 
 interface LeaderboardEntry {
   rank: number;
@@ -17,10 +19,9 @@ interface LeaderboardEntry {
 }
 
 export default function LeaderboardPage() {
+  const { data: session, status } = useSession();
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [myPlayerId, setMyPlayerId] = useState<string>('');
-  const [myPlayerName, setMyPlayerName] = useState<string>('');
 
   const fetchLeaderboard = useCallback(async () => {
     setLoading(true);
@@ -38,12 +39,32 @@ export default function LeaderboardPage() {
   }, []);
 
   useEffect(() => {
-    setMyPlayerId(getOrCreatePlayerId());
-    setMyPlayerName(getPlayerName() || '');
     fetchLeaderboard();
+
+    const handleFocus = () => {
+      fetchLeaderboard();
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        fetchLeaderboard();
+      }
+    };
+
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('vanish_xo_leaderboard_updated', handleFocus);
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('vanish_xo_leaderboard_updated', handleFocus);
+    };
   }, [fetchLeaderboard]);
 
-  const myEntry = leaderboard.find((e) => e.playerId === myPlayerId);
+  const myPlayerId = session?.user?.id || '';
+  const myPlayerName = getPlayerName(session?.user);
+  const myEntry = myPlayerId ? leaderboard.find((e) => e.playerId === myPlayerId) : null;
 
   return (
     <main className="min-h-screen w-full flex flex-col items-center px-3 py-4 sm:py-6 bg-[#06080d] text-white select-none overflow-x-hidden">
@@ -85,7 +106,29 @@ export default function LeaderboardPage() {
           <span>Elo System · Base: 1000 · K: 32</span>
         </div>
 
-        {/* Player's Own Rank Card (if ranked or player exists) */}
+        {/* Guest Notification Banner */}
+        {status !== 'loading' && !session?.user && (
+          <div className="w-full max-w-[380px] p-3 rounded-2xl bg-slate-900/90 border border-cyan-500/30 flex items-center justify-between gap-3 shadow-[0_0_15px_rgba(0,240,255,0.1)]">
+            <div className="flex flex-col">
+              <span className="text-xs font-bold text-slate-200">
+                Playing as Guest
+              </span>
+              <span className="text-[11px] text-slate-400">
+                Sign in to join the global leaderboard
+              </span>
+            </div>
+            <button
+              type="button"
+              id="guest-leaderboard-signin-btn"
+              onClick={() => signIn('google')}
+              className="px-3.5 py-1.5 rounded-xl bg-cyan-400 text-black font-black text-xs uppercase tracking-wider shadow-md hover:bg-cyan-300 active:scale-95 transition-all shrink-0 cursor-pointer"
+            >
+              Sign In
+            </button>
+          </div>
+        )}
+
+        {/* Player's Own Rank Card (if signed-in and ranked) */}
         {myEntry && (
           <div className="w-full max-w-[380px] p-3 rounded-2xl bg-cyan-950/30 border border-cyan-500/40 shadow-[0_0_15px_rgba(0,240,255,0.15)] flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -132,7 +175,7 @@ export default function LeaderboardPage() {
               </div>
               <div className="flex flex-col gap-1 max-w-[280px]">
                 <p className="text-sm font-semibold text-slate-300 leading-snug">
-                  No one is ranked yet. You could be the first on the global leaderboard!
+                  No one is ranked yet. Be the first on the global leaderboard!
                 </p>
               </div>
               <Link
@@ -231,6 +274,9 @@ export default function LeaderboardPage() {
             </div>
           )}
         </div>
+
+        {/* Site Footer */}
+        <SiteFooter />
       </div>
     </main>
   );

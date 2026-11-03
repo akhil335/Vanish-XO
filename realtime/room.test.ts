@@ -134,24 +134,24 @@ describe('Vanish XO - Realtime Server Message Handler', () => {
     expect(room.state.turnSeatIndex).toBe(1); // Turn advanced to Player 2
   });
 
-  it('converts seat to bot after 60 seconds of disconnection', () => {
+  it('pauses and ends game cleanly on opponent disconnect without converting to bot', () => {
     room.handleMessage('conn1', JSON.stringify({ type: 'join', playerId: 'player1' }));
     room.handleMessage('conn2', JSON.stringify({ type: 'join', playerId: 'player2' }));
     room.handleMessage('conn2', JSON.stringify({ type: 'ready', ready: true }));
     const startTime = 1000000;
     room.handleMessage('conn1', JSON.stringify({ type: 'start' }), startTime);
 
-    // Player 2 disconnects at T = 1,000,000
+    // Player 2 disconnects at T = 1,000,000 -> game paused
     room.handleDisconnection('conn2', startTime);
     expect(room.state.seats[1].isConnected).toBe(false);
+    expect(room.state.paused).toBe(true);
+    expect(room.state.pausedReason).toBe('opponent_disconnected');
 
-    // 30s later: not yet bot
+    // 30s later: grace period expires -> game finishes with remaining player winning, NO bot!
     room.tick(startTime + 30000);
+    expect(room.state.status).toBe('finished');
+    expect(room.state.winner).toBe('X');
     expect(room.state.seats[1].isBot).toBe(false);
-
-    // 60s later: bot takes over seat!
-    room.tick(startTime + 60000);
-    expect(room.state.seats[1].isBot).toBe(true);
   });
 
   it('enforces rate limiting of max 10 messages per second', () => {
@@ -171,7 +171,7 @@ describe('Vanish XO - Realtime Server Message Handler', () => {
     expect(res11.error).toBe('RATE_LIMITED');
   });
 
-  it('rotates starting player on rematch', () => {
+  it('rotates starting player on rematch after both players agree', () => {
     room.handleMessage('conn1', JSON.stringify({ type: 'join', playerId: 'player1' }));
     room.handleMessage('conn2', JSON.stringify({ type: 'join', playerId: 'player2' }));
     room.handleMessage('conn2', JSON.stringify({ type: 'ready', ready: true }));
@@ -188,8 +188,13 @@ describe('Vanish XO - Realtime Server Message Handler', () => {
     expect(room.state.winner).toBe('X');
     expect(room.state.startingSeatIndex).toBe(0);
 
-    // Trigger rematch
+    // Trigger rematch: player 1 requests, game stays finished waiting for player 2
     room.handleMessage('conn1', JSON.stringify({ type: 'rematch' }));
+    expect(room.state.status).toBe('finished');
+    expect(room.state.rematchRequest?.requestedBy).toBe('player1');
+
+    // Player 2 accepts rematch -> game starts!
+    room.handleMessage('conn2', JSON.stringify({ type: 'rematch' }));
     expect(room.state.status).toBe('playing');
     // Starting seat rotated from 0 to 1!
     expect(room.state.startingSeatIndex).toBe(1);
@@ -233,7 +238,8 @@ describe('Vanish XO - Realtime Server Message Handler', () => {
 
       // If a player won, trigger rematch and continue playing
       if (room.state.status === 'finished') {
-        const rematchRes = room.handleMessage('conn1', JSON.stringify({ type: 'rematch' }), simTime);
+        room.handleMessage('conn1', JSON.stringify({ type: 'rematch' }), simTime);
+        const rematchRes = room.handleMessage('conn2', JSON.stringify({ type: 'rematch' }), simTime);
         expect(rematchRes.success).toBe(true);
         expect(room.state.status).toBe('playing');
         continue;
@@ -353,7 +359,7 @@ describe('Vanish XO - Realtime Server Message Handler', () => {
     expect(room.state.seats[1].isReady).toBe(true);
   });
 
-  it('supports leaving cleanly via Home during game over and auto-fills bots for rematch', () => {
+  it('supports leaving cleanly via Home during game over and NEVER auto-fills bots for rematch', () => {
     room.handleMessage('conn1', JSON.stringify({ type: 'join', playerId: 'p1' }));
     room.handleMessage('conn2', JSON.stringify({ type: 'join', playerId: 'p2' }));
     room.handleMessage('conn2', JSON.stringify({ type: 'ready', ready: true }));
@@ -368,12 +374,12 @@ describe('Vanish XO - Realtime Server Message Handler', () => {
     expect(room.state.seats[1].playerId).toBeNull();
     expect(room.state.seats[1].isConnected).toBe(false);
 
-    // Player 1 taps Again (rematch): empty seat 1 is automatically filled with a bot!
+    // Player 1 taps Again (rematch): empty seat 1 is NOT filled with a bot; rematch is rejected
     const rematchRes = room.handleMessage('conn1', JSON.stringify({ type: 'rematch' }));
-    expect(rematchRes.success).toBe(true);
-    expect(room.state.status).toBe('playing');
-    expect(room.state.seats[1].isBot).toBe(true);
-    expect(room.state.seats[1].isConnected).toBe(true);
+    expect(rematchRes.success).toBe(false);
+    expect(rematchRes.error).toBe('OPPONENT_NOT_AVAILABLE');
+    expect(room.state.status).toBe('finished');
+    expect(room.state.seats[1].isBot).toBe(false);
   });
 
   describe('Room State Machine (Fresh / Uninitialized / Matchmaking)', () => {

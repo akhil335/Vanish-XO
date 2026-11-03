@@ -1,13 +1,36 @@
 // Web Audio API Synthesizer for high-tech neon sound effects
-// Off by default as required. No external mp3 assets required.
+// Enabled by default. No external mp3 assets required.
+
+const SOUND_STORAGE_KEY = 'vanish_xo_sound_enabled';
 
 class SoundManager {
   private ctx: AudioContext | null = null;
-  private enabled: boolean = false;
+  private enabled: boolean = true;
 
   constructor() {
-    // Sound is off by default
-    this.enabled = false;
+    // Sound is on by default
+    this.enabled = true;
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem(SOUND_STORAGE_KEY);
+        if (saved !== null) {
+          this.enabled = saved === 'true';
+        }
+      } catch {
+        // Safe fallback for restricted environments
+      }
+
+      // Resume or initialize audio context on first user interaction
+      const unlockAudio = () => {
+        if (this.enabled) {
+          this.initCtx();
+        }
+        window.removeEventListener('pointerdown', unlockAudio);
+        window.removeEventListener('keydown', unlockAudio);
+      };
+      window.addEventListener('pointerdown', unlockAudio, { once: true, passive: true });
+      window.addEventListener('keydown', unlockAudio, { once: true, passive: true });
+    }
   }
 
   public isEnabled(): boolean {
@@ -16,6 +39,13 @@ class SoundManager {
 
   public setEnabled(val: boolean) {
     this.enabled = val;
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(SOUND_STORAGE_KEY, String(val));
+      } catch {
+        // Safe fallback
+      }
+    }
     if (val) {
       this.initCtx();
     }
@@ -35,7 +65,7 @@ class SoundManager {
       }
     }
     if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume().catch(() => {});
+      this.ctx.resume().catch(() => { });
     }
   }
 

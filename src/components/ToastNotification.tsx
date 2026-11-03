@@ -7,11 +7,12 @@ import { SEAT_COLORS, MARK_SYMBOLS } from '@/lib/types';
 
 export interface ToastItem {
   id: string;
-  type: 'player_joined' | 'player_left' | 'seats_changed' | 'host_changed';
+  type: 'player_joined' | 'player_left' | 'seats_changed' | 'host_changed' | 'message';
   seatIndex?: number;
   seatsCount?: 2 | 3 | 4;
   isBot?: boolean;
   newHostPlayerId?: string;
+  message?: string;
 }
 
 interface ToastNotificationProps {
@@ -23,6 +24,20 @@ export const ToastNotification: React.FC<ToastNotificationProps> = ({ toasts }) 
     <div className="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none select-none">
       <AnimatePresence>
         {toasts.map((toast) => {
+          if (toast.type === 'message') {
+            return (
+              <motion.div
+                key={toast.id}
+                initial={{ opacity: 0, y: -10, scale: 0.9 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.15 } }}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900/95 border border-amber-500/40 backdrop-blur-md shadow-[0_0_15px_rgba(245,158,11,0.25)] text-xs font-bold text-amber-300"
+              >
+                <span>{toast.message}</span>
+              </motion.div>
+            );
+          }
+
           if (toast.type === 'host_changed') {
             const seatIdx = toast.seatIndex ?? 0;
             const symbol = MARK_SYMBOLS[seatIdx] || 'X';

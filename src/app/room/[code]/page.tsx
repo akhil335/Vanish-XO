@@ -5,9 +5,8 @@ import PartySocket from 'partysocket';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, Share2, Play, Check, Users, Eye, DoorOpen, X, DoorClosed, HelpCircle, AlertTriangle, Home, Activity, RotateCcw, Bot } from 'lucide-react';
 import { RoomState, ServerMessage, MarkSymbol, MatchConfig, isValidRoomCode, generateRoomCode } from '@/lib/types';
-import { getOrCreatePlayerId } from '@/lib/player';
 import { getRealtimeConfig, getSiteUrl } from '@/lib/config';
-import { track } from '@/lib/analytics';
+import { track, trackFirstMove } from '@/lib/analytics';
 import { soundManager, triggerHaptic } from '@/lib/audio';
 import { GameBoard } from '@/components/GameBoard';
 import { OnlinePlayerBar } from '@/components/OnlinePlayerBar';
@@ -18,8 +17,11 @@ import { getBoardAtMove, getMoveInsights } from '@/lib/game';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { loadProgression, saveProgression, updateStats } from '@/lib/progress';
 import { BadgeToast, BadgeToastItem } from '@/components/BadgeToast';
+import { useSession } from 'next-auth/react';
+import { getOrCreatePlayerId, getPlayerName, generateGuestName } from '@/lib/player';
 
 function RoomPageContent() {
+  const { data: session } = useSession();
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -107,9 +109,19 @@ function RoomPageContent() {
 
   const currentReplayInsight = replayInsights[replayStepIndex];
 
+  // Reset local replay state whenever a new round begins or status changes to playing
+  useEffect(() => {
+    const currentPhase = roomState?.phase ?? roomState?.status;
+    if (currentPhase === 'playing') {
+      setIsReplay(false);
+      setReplayStepIndex(0);
+    }
+  }, [roomState?.phase, roomState?.status]);
+
   const socketRef = useRef<PartySocket | null>(null);
   const prevStateRef = useRef<RoomState | null>(null);
   const prevSeatsCountRef = useRef<number | null>(null);
+  const gameStartTimeRef = useRef<number | null>(null);
 
   // Initialize player ID from localStorage if not already initialized
   useEffect(() => {
@@ -215,10 +227,12 @@ function RoomPageContent() {
         clearTimeout(reconnectTimeoutRef.current);
         reconnectTimeoutRef.current = null;
       }
+      const currentName = getPlayerName(session?.user);
+      const currentUserId = session?.user?.id || undefined;
       if (isCreateRef.current) {
-        socket.send(JSON.stringify({ type: 'create', playerId }));
+        socket.send(JSON.stringify({ type: 'create', playerId, playerName: currentName, name: currentName, userId: currentUserId }));
       } else {
-        socket.send(JSON.stringify({ type: 'join', playerId, matchConfig, matchToken }));
+        socket.send(JSON.stringify({ type: 'join', playerId, playerName: currentName, name: currentName, userId: currentUserId, matchConfig, matchToken }));
       }
     });
 
@@ -275,6 +289,7 @@ function RoomPageContent() {
 
           // Track game_started once per game start
           if (prev && prev.status !== 'playing' && nextState.status === 'playing') {
+            gameStartTimeRef.current = Date.now();
             track('game_started', {
               players: nextState.seatsCount,
               bots: nextState.seats.filter((s) => s.isBot).length,
@@ -309,11 +324,20 @@ function RoomPageContent() {
           // Track game_finished once when winner appears
           if (nextState.winner && !prev?.winner) {
             const totalTurns = Object.values(nextState.playerMoves).reduce((acc, m) => acc + m.length, 0);
+            const startTimestamp = gameStartTimeRef.current || (nextState.turnStartedAt ? nextState.turnStartedAt : null);
+            let durationSeconds: number | undefined;
+            if (startTimestamp) {
+              const diff = Math.round((Date.now() - startTimestamp) / 1000);
+              if (!isNaN(diff) && diff >= 0) {
+                durationSeconds = diff;
+              }
+            }
             track('game_finished', {
               players: nextState.seatsCount,
               bots: nextState.seats.filter((s) => s.isBot).length,
               turns: totalTurns,
               mode: isMatchmade ? 'matchmaking' : 'private',
+              ...(durationSeconds !== undefined ? { duration_seconds: durationSeconds } : {}),
             });
 
             // Local Progression Update (stats & badges)
@@ -348,6 +372,47 @@ function RoomPageContent() {
                 track('streak_reached', { n: updateRes.newStreakReached });
               }
             }
+
+            // Record ranked result for online room game
+            fetch('/api/leaderboard/record', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                roomCode,
+                roomState: nextState,
+                callerPlayerId: activePlayerId,
+              }),
+            })
+              .then((res) => res.json())
+              .then((data: any) => {
+                if (data.rated && !data.alreadyRecorded) {
+                  addToast({
+                    type: 'message',
+                    message: `Ranked result recorded! ${data.winner?.name || 'Winner'} won (+${data.winner?.delta ?? 0})`,
+                  });
+                  if (typeof window !== 'undefined') {
+                    window.dispatchEvent(new Event('vanish_xo_leaderboard_updated'));
+                  }
+                } else if (!data.rated && data.message && session?.user?.id) {
+                  addToast({
+                    type: 'message',
+                    message: data.message,
+                  });
+                }
+              })
+              .catch((err) => {
+                console.error('[room:record] Failed to record ranked match result:', err);
+                if (session?.user?.id) {
+                  addToast({
+                    type: 'message',
+                    message: 'Unable to record ranked result.',
+                  });
+                }
+              });
+          }
+
+          if (nextState.rematchDeclined && !prev?.rematchDeclined) {
+            addToast({ type: 'message', message: 'Rematch declined or timed out' });
           }
 
           prevStateRef.current = nextState;
@@ -359,6 +424,14 @@ function RoomPageContent() {
         } else if (msg.type === 'host_changed') {
           addToast({ type: 'host_changed', seatIndex: msg.seatIndex, newHostPlayerId: msg.newHostPlayerId });
         } else if (msg.type === 'error') {
+          if (msg.code === 'REMATCH_TIMEOUT') {
+            addToast({ type: 'message', message: 'Rematch request timed out' });
+            return;
+          }
+          if (msg.code === 'OPPONENT_NOT_AVAILABLE') {
+            addToast({ type: 'message', message: msg.message || 'Opponent is not available for a rematch' });
+            return;
+          }
           if (msg.code === 'ROOM_NOT_FOUND') {
             if (!hasTrackedNotFoundRef.current) {
               hasTrackedNotFoundRef.current = true;
@@ -444,7 +517,7 @@ function RoomPageContent() {
       }
     };
 
-    const interval = setInterval(sendHeartbeat, 25000);
+    const interval = setInterval(sendHeartbeat, 3000);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
@@ -473,6 +546,41 @@ function RoomPageContent() {
     router.push('/');
   }, [router]);
 
+  // Register room session with Next.js server for server-side verification
+  useEffect(() => {
+    if (!roomCode || !playerId) return;
+    const seatIdx = roomState?.seats.findIndex((s) => s.playerId === playerId);
+    const resolvedSeatIndex = seatIdx !== undefined && seatIdx >= 0 ? seatIdx : 0;
+
+    fetch('/api/room/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        roomCode,
+        seatIndex: resolvedSeatIndex,
+        playerId,
+      }),
+    }).catch((err) => console.error('[room:session] Failed to register session:', err));
+  }, [roomCode, playerId, session?.user?.id, roomState?.seats]);
+
+  // Keep player identity / name synced if session loads after socket opens
+  useEffect(() => {
+    if (!socketRef.current || !playerId) return;
+    const currentName = getPlayerName(session?.user);
+    const currentUserId = session?.user?.id || undefined;
+    if (socketRef.current.readyState === 1) {
+      socketRef.current.send(
+        JSON.stringify({
+          type: 'join',
+          playerId,
+          playerName: currentName,
+          name: currentName,
+          userId: currentUserId,
+        })
+      );
+    }
+  }, [session?.user, playerId]);
+
   const handleBackClick = () => {
     const activePhase = roomState?.phase ?? roomState?.status;
     if (activePhase === 'playing') {
@@ -493,11 +601,22 @@ function RoomPageContent() {
   const roomPhase = roomState ? (roomState.phase ?? roomState.status) : 'uninitialized';
   const isMyTurn = roomPhase === 'playing' && roomState?.turnSeatIndex === mySeatIndex;
 
+  const opponentSeat = roomState?.seats.find((s) => s.seatIndex !== mySeatIndex && (s.playerId !== null || s.isBot));
+  const rawOpponentName = opponentSeat?.playerName || opponentSeat?.name;
+  const opponentName = opponentSeat?.isBot
+    ? 'Bot'
+    : (rawOpponentName && rawOpponentName.trim() && rawOpponentName.trim() !== 'Player')
+    ? rawOpponentName.trim()
+    : (opponentSeat?.playerId && opponentSeat.playerId.startsWith('p_') ? generateGuestName(opponentSeat.playerId) : (rawOpponentName || 'Opponent'));
+  const isOpponentDisconnected = Boolean(opponentSeat && (opponentSeat.isConnected === false || opponentSeat.connected === false));
+  const isOpponentGone = Boolean(!opponentSeat || opponentSeat.playerId === null || isOpponentDisconnected);
+
   const isInputLockedRef = useRef(false);
 
   // Actions
   const handleCellClick = (cellIndex: number) => {
     if (!socketRef.current || !isMyTurn || isInputLockedRef.current) return;
+    trackFirstMove(isMatchmade ? 'matchmaking' : 'private');
     isInputLockedRef.current = true;
     socketRef.current.send(JSON.stringify({ type: 'place', cell: cellIndex }));
     setTimeout(() => {
@@ -528,7 +647,18 @@ function RoomPageContent() {
   const handleRematch = () => {
     track('rematch_clicked', { mode: isMatchmade ? 'matchmaking' : 'private' });
     if (!socketRef.current) return;
-    socketRef.current.send(JSON.stringify({ type: 'rematch' }));
+    socketRef.current.send(JSON.stringify({ type: 'rematch_request' }));
+    addToast({ type: 'message', message: 'Rematch requested! Waiting for opponent...' });
+  };
+
+  const handleRematchAccept = () => {
+    if (!socketRef.current) return;
+    socketRef.current.send(JSON.stringify({ type: 'rematch_accept' }));
+  };
+
+  const handleRematchDecline = () => {
+    if (!socketRef.current) return;
+    socketRef.current.send(JSON.stringify({ type: 'rematch_decline' }));
   };
 
   const handleRetry = useCallback(() => {
@@ -762,6 +892,7 @@ function RoomPageContent() {
             roomState={effectiveRoomState}
             mySeatIndex={mySeatIndex}
             isHost={isHost}
+            myPlayerName={getPlayerName(session?.user)}
             highlightUnready={highlightUnready}
             blockReasons={blockReasons}
             onToggleBot={handleToggleBot}
@@ -888,6 +1019,25 @@ function RoomPageContent() {
           </div>
         )}
 
+        {/* Opponent Disconnect / Pause Notice */}
+        {roomPhase === 'playing' && effectiveRoomState?.paused && (
+          <div className="w-full flex items-center justify-center gap-2 p-2.5 rounded-2xl bg-amber-500/15 border border-amber-500/40 text-amber-300 text-xs font-bold animate-pulse backdrop-blur-md shadow-lg">
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping" />
+            <span>
+              {effectiveRoomState.pausedReason === 'opponent_left'
+                ? `${opponentName} left`
+                : 'Waiting for opponent to reconnect...'}
+            </span>
+          </div>
+        )}
+
+        {/* Game Abandoned Notice */}
+        {roomPhase === 'finished' && effectiveRoomState?.pausedReason === 'opponent_abandoned' && (
+          <div className="w-full flex items-center justify-center gap-2 p-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-bold">
+            <span>{opponentName} left the game</span>
+          </div>
+        )}
+
         {/* Game Over Banner (ABOVE the board, never covering it) */}
         {effectiveRoomState?.winner && (
           <GameOverBanner
@@ -900,6 +1050,19 @@ function RoomPageContent() {
                 : 'lose'
             }
             mySymbol={mySeat?.symbol}
+            winnerName={
+              mySeat?.symbol === effectiveRoomState.winner
+                ? getPlayerName(session?.user)
+                : (() => {
+                    const winningSeat = effectiveRoomState.seats.find((s) => s.symbol === effectiveRoomState.winner);
+                    const rawName = winningSeat?.playerName || winningSeat?.name;
+                    return winningSeat?.isBot
+                      ? 'Bot'
+                      : (rawName && rawName.trim() && rawName.trim() !== 'Player')
+                      ? rawName.trim()
+                      : (winningSeat?.playerId && winningSeat.playerId.startsWith('p_') ? generateGuestName(winningSeat.playerId) : (rawName || 'Player'));
+                  })()
+            }
             isReplay={isReplayActive}
             replayMove={currentReplayState?.lastMove}
             replayStepIndex={replayStepIndex}
@@ -913,7 +1076,7 @@ function RoomPageContent() {
         <GameBoard
           roomState={effectiveRoomState}
           onCellClick={handleCellClick}
-          disabled={!isMyTurn || roomPhase !== 'playing' || isReplayActive}
+          disabled={!isMyTurn || roomPhase !== 'playing' || isReplayActive || Boolean(effectiveRoomState?.paused)}
           vanishedAnim={vanishedAnim}
           onVanishedAnimComplete={() => setVanishedAnim(null)}
           boardOverride={isReplayActive && currentReplayState ? currentReplayState.board : undefined}
@@ -962,6 +1125,22 @@ function RoomPageContent() {
               track('home_clicked', { from: 'gameover' });
               handleLeaveRoom();
             }}
+            isRematchWaiting={Boolean(
+              effectiveRoomState.rematchRequest &&
+              effectiveRoomState.rematchRequest.requestedBy === myPlayerId
+            )}
+            rematchPrompt={
+              effectiveRoomState.rematchRequest &&
+              effectiveRoomState.rematchRequest.requestedBy !== myPlayerId
+                ? {
+                    requesterName: effectiveRoomState.rematchRequest.requesterName || opponentName || 'Opponent',
+                    onAccept: handleRematchAccept,
+                    onDecline: handleRematchDecline,
+                  }
+                : null
+            }
+            isOpponentGone={isOpponentGone}
+            onShare={handleShare}
             onOpenReplay={() => {
               setIsReplay(true);
               setReplayStepIndex(Math.max(0, (effectiveRoomState.history?.length || 1) - 1));

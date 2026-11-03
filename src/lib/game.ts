@@ -962,6 +962,7 @@ export function placeRoomMark(
     winningLine,
     lastVanished,
     status: nextStatus,
+    phase: nextStatus,
     history: newHistory,
     lastMoveCell: cellIndex,
   };
@@ -999,6 +1000,7 @@ export function resetRoomForRematch(state: RoomState, timestamp: number = Date.n
       '■': [],
     },
     status: 'playing',
+    phase: 'playing',
     turnSeatIndex: nextStartingSeat,
     startingSeatIndex: nextStartingSeat,
     turnStartedAt: timestamp,

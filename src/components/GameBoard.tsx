@@ -23,6 +23,7 @@ export interface GameBoardProps {
   boardOverride?: (MarkSymbol | null)[];
   isReplay?: boolean;
   onWinLineComplete?: () => void;
+  tutorialStep?: number | null;
 }
 
 export const GameBoard: React.FC<GameBoardProps> = ({
@@ -40,6 +41,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   boardOverride,
   isReplay = false,
   onWinLineComplete,
+  tutorialStep = null,
 }) => {
   const board = boardOverride
     ? boardOverride
@@ -244,7 +246,11 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       {/* Main Grid Frame */}
       <div
         ref={gridRef}
-        className={`relative w-full h-full rounded-3xl p-2.5 sm:p-3 bg-[#0a0d17]/90 backdrop-blur-md border-2 transition-all duration-300 grid ${gapClass}`}
+        className={`relative w-full h-full rounded-3xl p-2.5 sm:p-3 bg-[#0a0d17]/90 backdrop-blur-md border-2 transition-all duration-300 grid ${gapClass} ${
+          tutorialStep === 0
+            ? 'ring-2 ring-cyan-400/80 shadow-[0_0_35px_rgba(0,240,255,0.45)]'
+            : ''
+        }`}
         style={{
           borderColor: boardBorderColor,
           boxShadow: boardShadowGlow,
@@ -275,12 +281,20 @@ export const GameBoard: React.FC<GameBoardProps> = ({
               aria-label={`Cell ${index + 1}`}
               disabled={!isClickable}
               onClick={() => onCellClick(index)}
-              whileHover={isClickable ? { scale: 1.02, backgroundColor: 'rgba(30, 41, 59, 0.7)' } : {}}
+              whileHover={isClickable ? { scale: 1.02 } : {}}
               whileTap={isClickable ? { scale: 0.96 } : {}}
               className={`relative flex items-center justify-center ${cellRoundedClass} transition-all duration-200 select-none overflow-hidden touch-manipulation ${
                 mark
                   ? 'bg-slate-900/60 border border-white/5'
-                  : 'bg-slate-900/30 border border-white/[0.04] hover:border-white/20 active:bg-slate-800/40'
+                  : `bg-slate-800/50 border border-cyan-500/25 ${
+                      tutorialStep === 4 && isClickable
+                        ? 'border-cyan-400/70 shadow-[0_0_12px_rgba(0,240,255,0.3)] animate-pulse'
+                        : ''
+                    } ${
+                      isClickable
+                        ? 'hover:border-cyan-400/50 hover:bg-slate-700/60 hover:shadow-[0_0_12px_rgba(0,240,255,0.2)] active:border-cyan-300/70 active:bg-cyan-950/60'
+                        : ''
+                    }`
               } ${
                 isClickable
                   ? 'cursor-pointer'

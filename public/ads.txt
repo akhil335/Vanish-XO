@@ -1,0 +1,2 @@
+# Adsterra ad tags are loaded via iframe.
+# If Adsterra provides specific ads.txt entries in your dashboard, add them below.
