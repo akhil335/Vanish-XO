@@ -9,8 +9,6 @@ import {
   Player,
   getBoardAtMove,
   getMoveInsights,
-  BOT_TIMING_CONFIG,
-  getBotThinkingDelay,
 } from '@/lib/game';
 import { soundManager, triggerHaptic } from '@/lib/audio';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -76,19 +74,22 @@ function HomeContent() {
 
   // Check first-time player on mount (bot mode on Easy for first game)
   useEffect(() => {
-    try {
-      const done = isTutorialCompleted();
-      if (!done) {
-        setMode('bot');
-        setBotDifficulty('easy');
-        setIsTutorialOpen(true);
-        setTutorialStep(0);
-        tutorialStartTimeRef.current = Date.now();
+    const timer = setTimeout(() => {
+      try {
+        const done = isTutorialCompleted();
+        if (!done) {
+          setMode('bot');
+          setBotDifficulty('easy');
+          setIsTutorialOpen(true);
+          setTutorialStep(0);
+          tutorialStartTimeRef.current = Date.now();
+        }
+      } catch {
+        // Storage access fallback
       }
-    } catch {
-      // Storage access fallback
-    }
-    setSoundEnabled(soundManager.isEnabled());
+      setSoundEnabled(soundManager.isEnabled());
+    }, 0);
+    return () => clearTimeout(timer);
   }, []);
 
   const handleTutorialSkip = useCallback(() => {

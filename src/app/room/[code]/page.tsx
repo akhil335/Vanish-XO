@@ -113,8 +113,11 @@ function RoomPageContent() {
   useEffect(() => {
     const currentPhase = roomState?.phase ?? roomState?.status;
     if (currentPhase === 'playing') {
-      setIsReplay(false);
-      setReplayStepIndex(0);
+      const timer = setTimeout(() => {
+        setIsReplay(false);
+        setReplayStepIndex(0);
+      }, 0);
+      return () => clearTimeout(timer);
     }
   }, [roomState?.phase, roomState?.status]);
 
@@ -384,7 +387,7 @@ function RoomPageContent() {
               }),
             })
               .then((res) => res.json())
-              .then((data: any) => {
+              .then((data: { rated?: boolean; alreadyRecorded?: boolean; winner?: { name?: string; delta?: number }; message?: string }) => {
                 if (data.rated && !data.alreadyRecorded) {
                   addToast({
                     type: 'message',
@@ -480,7 +483,7 @@ function RoomPageContent() {
       socket.close();
       socketRef.current = null;
     };
-  }, [playerId, roomCode, matchConfig, matchToken, addToast, isMatchmade, retryKey]);
+  }, [playerId, roomCode, matchConfig, matchToken, addToast, isMatchmade, retryKey, session?.user]);
 
   // Detect seat count changes in lobby and display toast
   useEffect(() => {

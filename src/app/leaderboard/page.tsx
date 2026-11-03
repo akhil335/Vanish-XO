@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Trophy, Medal, RotateCcw, User, Shield, Flame } from 'lucide-react';
+import { ArrowLeft, Trophy, Medal, RotateCcw, Shield } from 'lucide-react';
 import { useSession, signIn } from 'next-auth/react';
 import { getPlayerName } from '@/lib/player';
 import { SiteFooter } from '@/components/SiteFooter';
@@ -23,8 +23,10 @@ export default function LeaderboardPage() {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const fetchLeaderboard = useCallback(async () => {
-    setLoading(true);
+  const fetchLeaderboard = useCallback(async (isManual = false) => {
+    if (isManual) {
+      setLoading(true);
+    }
     try {
       const res = await fetch('/api/leaderboard?limit=50', { cache: 'no-store' });
       if (res.ok) {
@@ -39,15 +41,17 @@ export default function LeaderboardPage() {
   }, []);
 
   useEffect(() => {
-    fetchLeaderboard();
+    const timer = setTimeout(() => {
+      void fetchLeaderboard();
+    }, 0);
 
     const handleFocus = () => {
-      fetchLeaderboard();
+      void fetchLeaderboard();
     };
 
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
-        fetchLeaderboard();
+        void fetchLeaderboard();
       }
     };
 
@@ -56,6 +60,7 @@ export default function LeaderboardPage() {
     window.addEventListener('vanish_xo_leaderboard_updated', handleFocus);
 
     return () => {
+      clearTimeout(timer);
       window.removeEventListener('focus', handleFocus);
       document.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener('vanish_xo_leaderboard_updated', handleFocus);
@@ -91,7 +96,7 @@ export default function LeaderboardPage() {
 
           <button
             type="button"
-            onClick={fetchLeaderboard}
+            onClick={() => void fetchLeaderboard(true)}
             disabled={loading}
             aria-label="Refresh Leaderboard"
             className="min-h-[44px] min-w-[44px] flex items-center justify-center p-2 rounded-xl bg-slate-900/80 border border-white/5 text-slate-400 hover:text-cyan-400 transition-all cursor-pointer disabled:opacity-50"

@@ -5,7 +5,7 @@ import { registerRoomPlayerSession, registerRoomGuestSession } from '@/lib/leade
 export async function POST(request: Request) {
   try {
     const session = await auth();
-    const body = (await request.json()) as any;
+    const body = (await request.json()) as { roomCode?: string; seatIndex?: number; playerId?: string };
     const { roomCode, seatIndex = 0, playerId = '' } = body;
 
     if (!roomCode) {
@@ -32,8 +32,9 @@ export async function POST(request: Request) {
         isGuest: true,
       });
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[room:session] Failed to register room session:', error);
-    return NextResponse.json({ error: error?.message || 'Failed to register session' }, { status: 500 });
+    const message = error instanceof Error ? error.message : 'Failed to register session';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

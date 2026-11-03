@@ -45,8 +45,9 @@ export async function POST(request: Request) {
       playerName,
     });
     return NextResponse.json(result);
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Failed to record game result:', error);
-    return NextResponse.json({ error: error?.message || 'Failed to record game result' }, { status: 400 });
+    const message = error instanceof Error ? error.message : 'Failed to record game result';
+    return NextResponse.json({ error: message }, { status: 400 });
   }
 }

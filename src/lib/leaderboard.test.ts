@@ -14,12 +14,18 @@ import {
 describe('Player Names & Authentication State', () => {
   beforeEach(() => {
     const store = new Map<string, string>();
-    (globalThis as any).window = {};
-    (globalThis as any).localStorage = {
+    const customGlobal = globalThis as unknown as {
+      window: Record<string, unknown>;
+      localStorage: Storage;
+    };
+    customGlobal.window = {};
+    customGlobal.localStorage = {
       getItem: (k: string) => store.get(k) || null,
       setItem: (k: string, v: string) => store.set(k, String(v)),
       removeItem: (k: string) => store.delete(k),
       clear: () => store.clear(),
+      key: () => null,
+      length: 0,
     };
   });
 

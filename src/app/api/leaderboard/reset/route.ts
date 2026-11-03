@@ -57,10 +57,11 @@ export async function POST(request: Request) {
       message: 'All leaderboard data, ratings, and player profiles have been deleted.',
       clearedProfiles: result.clearedCount,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Failed to reset leaderboard:', error);
+    const message = error instanceof Error ? error.message : 'Failed to reset leaderboard';
     return NextResponse.json(
-      { error: error?.message || 'Failed to reset leaderboard' },
+      { error: message },
       { status: 500 }
     );
   }

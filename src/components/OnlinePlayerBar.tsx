@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Bot, User, Crown, Check, Circle, Share2, Plus, X } from 'lucide-react';
+import { Bot, User, Crown, Check, Circle, Share2, X } from 'lucide-react';
 import { RoomState, PlayerSeat, SEAT_COLORS } from '@/lib/types';
 import { generateGuestName } from '@/lib/player';
 

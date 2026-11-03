@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Bot, Users, Volume2, VolumeX, RotateCcw, Share2, Award, Edit2, HelpCircle } from 'lucide-react';
 import { GameState } from '@/lib/game';
 import { getPlayerName, setPlayerName } from '@/lib/player';
@@ -48,10 +48,15 @@ export const TopControls: React.FC<TopControlsProps> = ({
   const [isNameModalOpen, setIsNameModalOpen] = useState(false);
   const [tempName, setTempName] = useState('');
 
-  const [playerName, setPlayerNameState] = useState<string>('');
+  const [playerName, setPlayerNameState] = useState<string>(() =>
+    typeof window !== 'undefined' ? getPlayerName(session?.user) : ''
+  );
 
   useEffect(() => {
-    setPlayerNameState(getPlayerName(session?.user));
+    const timer = setTimeout(() => {
+      setPlayerNameState(getPlayerName(session?.user));
+    }, 0);
+    return () => clearTimeout(timer);
   }, [session?.user, nameVersion]);
 
   const handleInvite = async () => {

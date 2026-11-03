@@ -23,7 +23,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const body = (await request.json()) as any;
+    const body = (await request.json()) as { roomCode?: string; roomState?: Record<string, unknown> };
     const { roomCode, roomState: clientRoomState } = body;
 
     // Reject standalone requests without a roomCode (e.g. old bot or pass & play calls)
@@ -222,12 +222,13 @@ export async function POST(request: Request) {
         delta: result.deltaB,
       },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[leaderboard:record] Server error recording result:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Failed to record game result';
     return NextResponse.json(
       {
         success: false,
-        error: error?.message || 'Failed to record game result',
+        error: errorMessage,
         message: 'Unable to record ranked result. Please try again.',
       },
       { status: 500 }

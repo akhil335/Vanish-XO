@@ -34,11 +34,15 @@ jobs:
       - name: Install Dependencies
         run: pnpm install --frozen-lockfile
 
-      # Step 5: Run all 162 unit and integration tests using Vitest
+      # Step 5: Run linter to enforce code quality and React best practices
+      - name: Run Linter
+        run: pnpm lint
+
+      # Step 6: Run all 162 unit and integration tests using Vitest
       - name: Run Tests
         run: pnpm test
 
-      # Step 6: Verify Next.js TypeScript check and production build
+      # Step 7: Verify Next.js TypeScript check and production build
       - name: Run Build Check
         run: pnpm build
         env:

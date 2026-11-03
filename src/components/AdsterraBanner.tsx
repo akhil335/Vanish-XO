@@ -10,13 +10,14 @@ export const AdsterraBanner: React.FC = () => {
     isLoadedRef.current = true;
 
     try {
-      const win = window as any;
-      if (typeof win.atAsyncOptions !== 'object') {
+      type AdsterraOption = { key?: string; format?: string; async?: boolean; container?: string; params?: Record<string, unknown> };
+      const win = window as unknown as Window & { atAsyncOptions?: AdsterraOption[] };
+      if (!Array.isArray(win.atAsyncOptions)) {
         win.atAsyncOptions = [];
       }
       
       const alreadyConfigured = win.atAsyncOptions.some(
-        (opt: any) => opt.key === 'a1d3963a584b338cd8ac50a69b822992'
+        (opt: AdsterraOption) => opt.key === 'a1d3963a584b338cd8ac50a69b822992'
       );
 
       if (!alreadyConfigured) {

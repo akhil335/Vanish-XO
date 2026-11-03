@@ -1,7 +1,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { Metadata } from 'next';
-import { ArrowLeft, Gamepad2, Sparkles, HelpCircle, Lightbulb, ShieldAlert, Award } from 'lucide-react';
+import { ArrowLeft, Gamepad2, Sparkles, HelpCircle, Lightbulb, ShieldAlert } from 'lucide-react';
 import { SiteFooter } from '@/components/SiteFooter';
 
 export const metadata: Metadata = {

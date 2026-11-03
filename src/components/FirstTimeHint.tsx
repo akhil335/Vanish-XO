@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { Sparkles, Layers, Wind, Zap, Play, ChevronRight, X } from 'lucide-react';
 
 export const TUTORIAL_STORAGE_KEY = 'vanishxo_tutorial_done';
