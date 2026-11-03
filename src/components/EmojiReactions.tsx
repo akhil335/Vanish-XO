@@ -21,7 +21,11 @@ export const EmojiReactions: React.FC<EmojiReactionsProps> = ({
     <div
       role="toolbar"
       aria-label="Emoji reactions"
-      className="relative flex items-center justify-between gap-1 sm:gap-1.5 p-1.5 rounded-2xl bg-slate-900/70 border border-white/10 backdrop-blur-md shadow-lg overflow-x-auto no-scrollbar max-w-full"
+      style={{
+        scrollbarWidth: 'none',
+        msOverflowStyle: 'none',
+      }}
+      className="relative flex items-center justify-between gap-0.5 sm:gap-1.5 p-1 sm:p-1.5 rounded-2xl bg-slate-900/70 border border-white/10 backdrop-blur-md shadow-lg overflow-x-auto no-scrollbar max-w-full"
     >
       {/* Cooldown progress overlay indicator */}
       {isCooldown && cooldownProgress > 0 && (
@@ -47,7 +51,7 @@ export const EmojiReactions: React.FC<EmojiReactionsProps> = ({
             whileHover={!isDisabled ? { scale: 1.25, y: -2 } : undefined}
             whileTap={!isDisabled ? { scale: 0.9 } : undefined}
             aria-label={`React with ${emoji}`}
-            className={`relative flex items-center justify-center w-7 h-7 sm:w-8 sm:h-8 rounded-xl text-base sm:text-lg transition-opacity duration-150 select-none outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
+            className={`relative flex items-center justify-center shrink-0 w-6.5 h-6.5 xs:w-7 xs:h-7 sm:w-8 sm:h-8 rounded-xl text-sm xs:text-base sm:text-lg transition-opacity duration-150 select-none outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
               isDisabled
                 ? 'opacity-40 cursor-not-allowed filter grayscale-[0.2]'
                 : 'hover:bg-white/10 cursor-pointer active:scale-95'

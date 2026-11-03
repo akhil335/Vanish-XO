@@ -1506,12 +1506,17 @@ export class GameRoomHandler {
       }
     }
 
-    // 3. Inactivity check: 15s without heartbeat/message -> mark seat offline
+    // 3. Inactivity check: mark offline if connection is dropped or no message/ping received
     let stateChanged = false;
     for (const seat of this.state.seats) {
       if (!seat.isBot && seat.playerId !== null && seat.isConnected) {
+        const isConnAlive = Array.from(this.connToPlayerId.entries()).some(
+          ([connId, pid]) => pid === seat.playerId && this.connections.has(connId)
+        );
         const lastMsg = this.playerLastMessageTimestamps.get(seat.playerId) ?? this.lastActiveTimestamp;
-        if (now - lastMsg > 15000) {
+        // If connection is still open, allow 60s for background tab throttling; if socket closed, mark offline after 10s
+        const maxInactivityMs = isConnAlive ? 60000 : 10000;
+        if (now - lastMsg > maxInactivityMs) {
           seat.isConnected = false;
           seat.connected = false;
           seat.disconnectedAt = now;

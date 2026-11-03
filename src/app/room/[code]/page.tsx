@@ -507,11 +507,10 @@ function RoomPageContent() {
     prevSeatsCountRef.current = roomState.seatsCount;
   }, [roomState, addToast]);
 
-  // Client heartbeat every 25 seconds, paused when tab is hidden
+  // Client heartbeat every 3 seconds, runs continuously even when tab is in background
   useEffect(() => {
     const sendHeartbeat = () => {
       if (
-        document.visibilityState === 'visible' &&
         socketRef.current &&
         socketRef.current.readyState === WebSocket.OPEN
       ) {

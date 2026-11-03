@@ -58,7 +58,7 @@ export const QuickMessages: React.FC<QuickMessagesProps> = ({
             </div>
 
             {/* Grid of Chips */}
-            <div className="grid grid-cols-2 gap-1.5 max-h-56 overflow-y-auto pr-0.5">
+            <div className="grid grid-cols-2 gap-1.5 max-h-56 overflow-y-auto pr-0.5 no-scrollbar">
               {QUICK_MESSAGES.map((msg) => {
                 const isDisabled = disabled || isCooldown;
                 return (
