@@ -23,7 +23,13 @@ export async function POST(request: Request) {
       );
     }
 
-    const body = (await request.json()) as { roomCode?: string; roomState?: Record<string, unknown> };
+    interface RecordRequestBody {
+      roomCode?: string;
+      roomState?: RoomState;
+      callerPlayerId?: string;
+      gameId?: string;
+    }
+    const body = (await request.json()) as RecordRequestBody;
     const { roomCode, roomState: clientRoomState } = body;
 
     // Reject standalone requests without a roomCode (e.g. old bot or pass & play calls)
@@ -62,7 +68,7 @@ export async function POST(request: Request) {
       }
     }
 
-    const stateToVerify: RoomState = authoritativeState || clientRoomState;
+    const stateToVerify = authoritativeState || clientRoomState;
 
     if (!stateToVerify || stateToVerify.status !== 'finished') {
       return NextResponse.json(

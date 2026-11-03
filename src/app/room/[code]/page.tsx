@@ -386,8 +386,8 @@ function RoomPageContent() {
                 callerPlayerId: activePlayerId,
               }),
             })
-              .then((res) => res.json())
-              .then((data: { rated?: boolean; alreadyRecorded?: boolean; winner?: { name?: string; delta?: number }; message?: string }) => {
+              .then((res) => res.json() as Promise<{ rated?: boolean; alreadyRecorded?: boolean; winner?: { name?: string; delta?: number }; message?: string }>)
+              .then((data) => {
                 if (data.rated && !data.alreadyRecorded) {
                   addToast({
                     type: 'message',
