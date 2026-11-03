@@ -42,4 +42,5 @@ jobs:
       - name: Run Build Check
         run: pnpm build
         env:
-          NEXT_PUBLIC_APP_URL: https://vanishxo.online
+          NEXT_PUBLIC_SITE_URL: https://vanishxo.online
+
