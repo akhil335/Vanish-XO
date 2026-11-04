@@ -75,6 +75,7 @@ export class GameRoomHandler {
   private joinCreateTimestamps = new Map<string, number[]>();
   private playerLastMessageTimestamps = new Map<string, number>();
   private reactionTimestamps = new Map<string, number>();
+  public chatTimestamps = new Map<string, number[]>();
   public lastActiveTimestamp: number;
   public gameOverTimestamp: number | null = null;
   public isExpired: boolean = false;
@@ -247,6 +248,7 @@ export class GameRoomHandler {
     this.connToPlayerId.delete(connId);
     this.messageTimestamps.delete(connId);
     this.reactionTimestamps.delete(connId);
+    this.chatTimestamps.delete(connId);
   }
 
   public handleDisconnection(connId: string, now: number = Date.now()) {
@@ -255,6 +257,7 @@ export class GameRoomHandler {
     this.connToPlayerId.delete(connId);
     this.messageTimestamps.delete(connId);
     this.reactionTimestamps.delete(connId);
+    this.chatTimestamps.delete(connId);
 
     if (playerId) {
       // Find seat
@@ -415,6 +418,8 @@ export class GameRoomHandler {
         return this.handleLeave(connId, now);
       case 'reaction':
         return this.handleReaction(connId, msg.emoji, msg.quickMessage, now);
+      case 'chat_message':
+        return this.handleChatMessage(connId, msg.text, now);
       case 'ping':
         return { success: true };
     }
@@ -1287,6 +1292,120 @@ export class GameRoomHandler {
     return { success: true };
   }
 
+  private handleChatMessage(
+    connId: string,
+    rawText: string,
+    now: number = Date.now()
+  ): { success: boolean; error?: string } {
+    // 1. Chat is strictly enabled in 2-player rooms only
+    if (this.state.seatsCount !== 2) {
+      this.sendTo(connId, {
+        type: 'chat_error',
+        code: 'NOT_2P_ROOM',
+        message: 'Chat is only available in 2-player rooms.',
+      });
+      return { success: false, error: 'NOT_2P_ROOM' };
+    }
+
+    // 2. Chat is only enabled after both players are in the room
+    const humanSeats = this.state.seats.filter(
+      (s) => !s.isBot && s.playerId !== null && (s.isConnected || s.connected)
+    );
+    if (humanSeats.length < 2) {
+      this.sendTo(connId, {
+        type: 'chat_error',
+        code: 'WAITING_FOR_PLAYERS',
+        message: 'Chat is only enabled when both players are connected.',
+      });
+      return { success: false, error: 'WAITING_FOR_PLAYERS' };
+    }
+
+    // 3. Sender must be an authorized player in a seat
+    const playerId = this.connToPlayerId.get(connId);
+    const seat = playerId ? this.state.seats.find((s) => s.playerId === playerId) : undefined;
+    if (!seat) {
+      return { success: false, error: 'NOT_A_PLAYER' };
+    }
+
+    // 4. Rate limit: at most 5 messages per 10 seconds per player
+    const recent = (this.chatTimestamps.get(connId) || []).filter((t) => now - t < 10000);
+    if (recent.length >= 5) {
+      this.sendTo(connId, {
+        type: 'chat_error',
+        code: 'RATE_LIMIT',
+        message: 'Rate limit: max 5 messages per 10 seconds.',
+      });
+      return { success: false, error: 'RATE_LIMIT' };
+    }
+
+    // 5. Max 120 characters, trim whitespace, reject empty
+    const trimmed = (rawText || '').trim();
+    if (!trimmed || trimmed.length === 0) {
+      return { success: false, error: 'EMPTY_MESSAGE' };
+    }
+    if (trimmed.length > 120) {
+      this.sendTo(connId, {
+        type: 'chat_error',
+        code: 'MESSAGE_TOO_LONG',
+        message: 'Message cannot exceed 120 characters.',
+      });
+      return { success: false, error: 'MESSAGE_TOO_LONG' };
+    }
+
+    // 6. Remove links and URLs from messages
+    const URL_REGEX = /(?:https?:\/\/|ftp:\/\/|www\.)[^\s]+|[a-zA-Z0-9-]+\.(?:com|org|net|io|co|online|app|xyz|dev|edu|gov|mil|info|biz|me|tv|ai|gg)[^\s]*/gi;
+    let processed = trimmed.replace(URL_REGEX, '').replace(/\s+/g, ' ').trim();
+    if (!processed) {
+      this.sendTo(connId, {
+        type: 'chat_error',
+        code: 'LINK_NOT_ALLOWED',
+        message: 'Links and URLs are not allowed.',
+      });
+      return { success: false, error: 'LINK_NOT_ALLOWED' };
+    }
+
+    // 7. Escape HTML so scripts or tags cannot run
+    processed = processed
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+
+    // 8. Profanity filter replacing abusive words with asterisks
+    const PROFANE_WORDS = [
+      'fuck', 'shit', 'bitch', 'asshole', 'bastard', 'cunt', 'dick', 'pussy',
+      'nigger', 'nigga', 'faggot', 'retard', 'whore', 'slut', 'idiot', 'stupid',
+      'dumbass'
+    ];
+    for (const word of PROFANE_WORDS) {
+      const regex = new RegExp(`\\b${word}\\b`, 'gi');
+      processed = processed.replace(regex, (match) => '*'.repeat(match.length));
+    }
+
+    // Record rate limit timestamp
+    recent.push(now);
+    this.chatTimestamps.set(connId, recent);
+
+    // 9. Never trust sender name from browser: use name stored for that seat on the server
+    const senderName = seat.playerName || seat.name || `Player ${seat.symbol}`;
+    const id = `chat_${Math.random().toString(36).substring(2, 9)}_${now}`;
+
+    const chatMsg: ServerMessage = {
+      type: 'chat_message',
+      id,
+      seatIndex: seat.seatIndex,
+      symbol: seat.symbol,
+      senderName,
+      text: processed,
+      timestamp: now,
+    };
+
+    // Broadcast over existing room WebSocket to both players
+    this.broadcast(chatMsg);
+    return { success: true };
+  }
+
   public transferHostIfNeeded(): string | null {
     const currentHostSeat = this.state.seats.find((s) => s.playerId === this.state.hostPlayerId && s.isConnected);
     if (currentHostSeat) {
@@ -1734,6 +1853,7 @@ export class Main extends Server<Env> {
   public cleanupRoom() {
     this.devLog('Room expired, cleaning up');
     this.handler.cancelPendingBotMove();
+    this.handler.chatTimestamps.clear();
     if (this.tickInterval) {
       clearInterval(this.tickInterval);
       this.tickInterval = null;

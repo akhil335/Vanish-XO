@@ -87,12 +87,12 @@ describe('Vanish XO - Matchmaking Lobby Server', () => {
     lobby.handleMessage('conn2', JSON.stringify({ type: 'queue_join', playerId: 'p2', targetCount: 4 }), t0 + 2000);
     expect(lobby.queues[4].length).toBe(2);
 
-    // At 14 seconds (t0 + 14000), timeout has not triggered
-    lobby.checkTimeouts(t0 + 14000);
+    // At 5 seconds (t0 + 5000), timeout has not triggered
+    lobby.checkTimeouts(t0 + 5000);
     expect(lobby.queues[4].length).toBe(2);
 
-    // At 15 seconds (t0 + 15000), timeout triggers!
-    lobby.checkTimeouts(t0 + 15000);
+    // At 6 seconds (t0 + 6000), timeout triggers!
+    lobby.checkTimeouts(t0 + 6000);
     expect(lobby.queues[4].length).toBe(0); // Matched!
 
     const match1 = client1Messages.find((m) => m.type === 'match_found');
@@ -317,12 +317,12 @@ describe('Lobby Durable Object Class API (partyserver)', () => {
     lobbyServer.onMessage(conn1 as any, JSON.stringify({ type: 'queue_join', playerId: 'p1', targetCount: 2 }));
     expect(lobbyServer.queues[2].length).toBe(1);
 
-    // 14 seconds later: no match yet
-    lobbyServer.tick(now + 14000);
+    // 5 seconds later: no match yet
+    lobbyServer.tick(now + 5000);
     expect(lobbyServer.queues[2].length).toBe(1);
 
-    // 15 seconds later: bot fallback triggered!
-    await lobbyServer.tick(now + 16000);
+    // 6 seconds later: bot fallback triggered!
+    await lobbyServer.tick(now + 6500);
     await new Promise((r) => setTimeout(r, 50));
 
     expect(lobbyServer.queues[2].length).toBe(0);

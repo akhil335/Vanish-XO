@@ -213,7 +213,7 @@ export class LobbyHandler {
 
   /**
    * Cold start check: called every 1s
-   * If a queue has not filled after 15 seconds, fill missing seats with bots and start.
+   * If a queue has not filled after 6 seconds (5-7s window), fill missing seats with bots and start.
    * If at least one other human is waiting, they always get matched together.
    */
   public checkTimeouts(now: number = Date.now()): void | Promise<void> {
@@ -221,7 +221,7 @@ export class LobbyHandler {
       const queue = this.queues[count];
       if (queue.length > 0) {
         const oldest = queue[0];
-        if (now - oldest.joinedAt >= 15000) {
+        if (now - oldest.joinedAt >= 6000) {
           return this.createMatchWithBots(count);
         }
       }

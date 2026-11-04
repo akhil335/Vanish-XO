@@ -1552,6 +1552,144 @@ describe('Lobby Sync and Host Ownership Bug Fixes (Required Scenarios)', () => {
       expect(res3.success).toBe(true);
     });
   });
+
+  describe('2-Player Real-Time Text Chat', () => {
+    it('rejects chat in 3P or 4P rooms', () => {
+      const handler = new GameRoomHandler('ROOM3P', null, true);
+      handler.handleConnection('conn1', () => {});
+      handler.handleMessage('conn1', JSON.stringify({ type: 'join', playerId: 'p1' }));
+      handler.handleMessage('conn1', JSON.stringify({ type: 'set_seats', seatsCount: 3 }));
+      handler.handleConnection('conn2', () => {});
+      handler.handleMessage('conn2', JSON.stringify({ type: 'join', playerId: 'p2' }));
+      handler.handleConnection('conn3', () => {});
+      handler.handleMessage('conn3', JSON.stringify({ type: 'join', playerId: 'p3' }));
+
+      const res = handler.handleMessage('conn1', JSON.stringify({ type: 'chat_message', text: 'Hello' }));
+      expect(res.success).toBe(false);
+      expect(res.error).toBe('NOT_2P_ROOM');
+    });
+
+    it('rejects chat when both players are not yet in the room', () => {
+      const handler = new GameRoomHandler('ROOM2P', null, true);
+      handler.handleConnection('conn1', () => {});
+      handler.handleMessage('conn1', JSON.stringify({ type: 'join', playerId: 'p1' }));
+
+      const res = handler.handleMessage('conn1', JSON.stringify({ type: 'chat_message', text: 'Hello' }));
+      expect(res.success).toBe(false);
+      expect(res.error).toBe('WAITING_FOR_PLAYERS');
+    });
+
+    it('broadcasts chat with verified seat senderName, escaped HTML, and filtered profanity', () => {
+      const handler = new GameRoomHandler('ROOM2P', null, true);
+      const messages: any[] = [];
+      handler.handleConnection('conn1', (msg) => messages.push(JSON.parse(msg)));
+      handler.handleMessage('conn1', JSON.stringify({ type: 'join', playerId: 'p1', playerName: 'Akhil' }));
+      handler.handleConnection('conn2', (msg) => messages.push(JSON.parse(msg)));
+      handler.handleMessage('conn2', JSON.stringify({ type: 'join', playerId: 'p2', playerName: 'Opponent' }));
+
+      // Send message with HTML script and abusive word
+      const res = handler.handleMessage(
+        'conn1',
+        JSON.stringify({ type: 'chat_message', text: '<script>alert(1)</script> you dumbass' }),
+        1000
+      );
+      expect(res.success).toBe(true);
+
+      const chatBroadcast = messages.find((m) => m.type === 'chat_message');
+      expect(chatBroadcast).toBeDefined();
+      expect(chatBroadcast.senderName).toBe('Akhil');
+      expect(chatBroadcast.seatIndex).toBe(0);
+      expect(chatBroadcast.symbol).toBe('X');
+      // Escaped HTML
+      expect(chatBroadcast.text).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
+      // Masked profanity
+      expect(chatBroadcast.text).toContain('*******');
+      expect(chatBroadcast.text).not.toContain('dumbass');
+    });
+
+    it('removes links and URLs from chat messages', () => {
+      const handler = new GameRoomHandler('ROOM2P', null, true);
+      const messages: any[] = [];
+      handler.handleConnection('conn1', (msg) => messages.push(JSON.parse(msg)));
+      handler.handleMessage('conn1', JSON.stringify({ type: 'join', playerId: 'p1' }));
+      handler.handleConnection('conn2', () => {});
+      handler.handleMessage('conn2', JSON.stringify({ type: 'join', playerId: 'p2' }));
+
+      // Text with link
+      const res1 = handler.handleMessage(
+        'conn1',
+        JSON.stringify({ type: 'chat_message', text: 'visit https://malicious.com today' }),
+        1000
+      );
+      expect(res1.success).toBe(true);
+      const chatBroadcast = messages.find((m) => m.type === 'chat_message');
+      expect(chatBroadcast.text).toBe('visit today');
+      expect(chatBroadcast.text).not.toContain('https://malicious.com');
+
+      // Only link should be rejected
+      const res2 = handler.handleMessage(
+        'conn1',
+        JSON.stringify({ type: 'chat_message', text: 'https://onlylink.org' }),
+        2000
+      );
+      expect(res2.success).toBe(false);
+      expect(res2.error).toBe('LINK_NOT_ALLOWED');
+    });
+
+    it('enforces 120 character limit and rejects empty messages', () => {
+      const handler = new GameRoomHandler('ROOM2P', null, true);
+      handler.handleConnection('conn1', () => {});
+      handler.handleMessage('conn1', JSON.stringify({ type: 'join', playerId: 'p1' }));
+      handler.handleConnection('conn2', () => {});
+      handler.handleMessage('conn2', JSON.stringify({ type: 'join', playerId: 'p2' }));
+
+      // Empty
+      const resEmpty = handler.handleMessage('conn1', JSON.stringify({ type: 'chat_message', text: '   ' }));
+      expect(resEmpty.success).toBe(false);
+      expect(resEmpty.error).toBe('EMPTY_MESSAGE');
+
+      // Over 120 chars
+      const longText = 'a'.repeat(121);
+      const resLong = handler.handleMessage('conn1', JSON.stringify({ type: 'chat_message', text: longText }));
+      expect(resLong.success).toBe(false);
+      expect(resLong.error).toBe('MESSAGE_TOO_LONG');
+    });
+
+    it('enforces rate limit of at most 5 messages per 10 seconds per player', () => {
+      const handler = new GameRoomHandler('ROOM2P', null, true);
+      handler.handleConnection('conn1', () => {});
+      handler.handleMessage('conn1', JSON.stringify({ type: 'join', playerId: 'p1' }));
+      handler.handleConnection('conn2', () => {});
+      handler.handleMessage('conn2', JSON.stringify({ type: 'join', playerId: 'p2' }));
+
+      const t0 = 10000;
+      for (let i = 0; i < 5; i++) {
+        const res = handler.handleMessage(
+          'conn1',
+          JSON.stringify({ type: 'chat_message', text: `Message ${i}` }),
+          t0 + i * 1000
+        );
+        expect(res.success).toBe(true);
+      }
+
+      // 6th message within 10 seconds should fail rate limit
+      const res6 = handler.handleMessage(
+        'conn1',
+        JSON.stringify({ type: 'chat_message', text: 'Message 6' }),
+        t0 + 5000
+      );
+      expect(res6.success).toBe(false);
+      expect(res6.error).toBe('RATE_LIMIT');
+
+      // After 10 seconds from oldest, should succeed again
+      const res7 = handler.handleMessage(
+        'conn1',
+        JSON.stringify({ type: 'chat_message', text: 'Message 7' }),
+        t0 + 10500
+      );
+      expect(res7.success).toBe(true);
+    });
+  });
 });
 
 

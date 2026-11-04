@@ -80,6 +80,9 @@ export default function PrivacyPolicyPage() {
             <p className="mt-2 text-slate-300">
               <strong>Google Sign-In:</strong> We offer optional authentication via Google Sign-In (using Auth.js) to enable persistent player profiles and ranked global leaderboard participation. When you sign in with Google, we store only what is needed: a stable user ID, display name, and email address. Your email is never displayed publicly or shared with third parties. No passwords are ever requested or stored.
             </p>
+            <p className="mt-2 text-slate-300">
+              <strong>In-Game Chat:</strong> In-game real-time text chat messages in 2-player online rooms are kept strictly in temporary memory for the duration of the match and are never stored in any database. Messages may be reported by the other player for community safety and moderation, and players should not share any personal or sensitive information in chat.
+            </p>
           </section>
 
           {/* Section 2: Cookies & Local Storage */}

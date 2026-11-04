@@ -160,9 +160,22 @@ export const ClientMessageSchema = z.discriminatedUnion('type', [
     emoji: z.string().max(16).optional(),
     quickMessage: z.string().max(64).optional(),
   }),
+  z.object({
+    type: z.literal('chat_message'),
+    text: z.string().max(300),
+  }),
 ]);
 
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
+
+export interface RoomChatMessage {
+  id: string;
+  seatIndex: number;
+  symbol: MarkSymbol;
+  senderName: string;
+  text: string;
+  timestamp: number;
+}
 
 // Server to Client Messages for Game Rooms
 export type ServerMessage =
@@ -180,6 +193,20 @@ export type ServerMessage =
       emoji?: string;
       quickMessage?: string;
       timestamp: number;
+    }
+  | {
+      type: 'chat_message';
+      id: string;
+      seatIndex: number;
+      symbol: MarkSymbol;
+      senderName: string;
+      text: string;
+      timestamp: number;
+    }
+  | {
+      type: 'chat_error';
+      code: string;
+      message: string;
     };
 
 export const EMOJI_REACTIONS = [
